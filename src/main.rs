@@ -2,6 +2,7 @@
 
 use clap::Parser;
 use pomfret::config::{default_backends_config_path, resolve_config, AppState};
+use pomfret::routing::{default_routing_config_path, load_routing_config};
 use pomfret::store::MemoryStore;
 use pomfret::web::{router, NotifyEvent, WebState};
 use std::net::SocketAddr;
@@ -42,13 +43,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .config
         .clone()
         .unwrap_or_else(default_backends_config_path);
-    let app_state = AppState::new(resolved.config);
+    let routing_path = default_routing_config_path();
+    let routing_config = if routing_path.exists() {
+        match load_routing_config(&routing_path) {
+            Ok(rc) => {
+                tracing::info!("loaded routing config from {}", routing_path.display());
+                rc
+            }
+            Err(e) => {
+                tracing::warn!("failed to load routing config: {}, using default", e);
+                Default::default()
+            }
+        }
+    } else {
+        Default::default()
+    };
+    let app_state = AppState::new_with_routing(resolved.config, routing_config);
     let store = MemoryStore::new(500);
     let (notify_tx, _) = broadcast::channel::<NotifyEvent>(32);
     let web_state = WebState {
         app_state,
         store: store.clone(),
         backends_path,
+        routing_path,
         notify_tx,
     };
 

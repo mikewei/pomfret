@@ -1,11 +1,13 @@
 //! Configuration and backend list.
 //!
-//! Backends are identified by id; one is selected as "current" for routing.
+//! Backends are identified by id. Routing is handled by the routing module.
 //! Server options (bind, port) are managed by CLI only; backends are loaded from
 //! `backends.conf` (default: ~/.pomfret/backends.conf).
 
+use crate::routing::RoutingConfig;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use uuid::Uuid;
@@ -42,8 +44,6 @@ fn default_backend_type() -> BackendType {
 #[derive(Debug, Clone)]
 pub struct Config {
     pub backends: Vec<BackendConfig>,
-    /// Index into backends for "current" backend; None means no backend selected.
-    pub current_index: Option<usize>,
 }
 
 impl Config {
@@ -51,7 +51,6 @@ impl Config {
     pub fn default_empty() -> Self {
         Self {
             backends: Vec::new(),
-            current_index: None,
         }
     }
 
@@ -67,27 +66,6 @@ impl Config {
                 backend_type: BackendType::Ollama,
                 model: None,
             }],
-            current_index: Some(0),
-        }
-    }
-
-    /// Current backend config if one is selected.
-    pub fn current_backend(&self) -> Option<&BackendConfig> {
-        self.current_index.and_then(|i| self.backends.get(i))
-    }
-
-    /// Set current backend by index; returns false if index out of range.
-    pub fn set_current_index(&mut self, index: Option<usize>) -> bool {
-        match index {
-            None => {
-                self.current_index = None;
-                true
-            }
-            Some(i) if i < self.backends.len() => {
-                self.current_index = Some(i);
-                true
-            }
-            _ => false,
         }
     }
 
@@ -122,24 +100,12 @@ impl Config {
         true
     }
 
-    /// Remove backend at index; adjusts current_index. Returns false if index out of range.
+    /// Remove backend at index. Returns false if index out of range.
     pub fn delete_backend(&mut self, index: usize) -> bool {
         if index >= self.backends.len() {
             return false;
         }
         self.backends.remove(index);
-        self.current_index = match self.current_index {
-            None => None,
-            Some(i) if i == index => {
-                if self.backends.is_empty() {
-                    None
-                } else {
-                    Some(0.min(i.saturating_sub(1)))
-                }
-            }
-            Some(i) if i > index => Some(i - 1),
-            Some(i) => Some(i),
-        };
         true
     }
 
@@ -166,11 +132,10 @@ impl Config {
     }
 }
 
-/// Configuration as stored in backends.conf (only backends and current selection).
+/// Configuration as stored in backends.conf (backends list).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", default)]
 pub struct FileConfig {
-    pub current_index: Option<usize>,
     pub backends: Option<Vec<BackendConfig>>,
 }
 
@@ -191,7 +156,6 @@ pub fn default_backends_config_path() -> std::path::PathBuf {
 /// Serialize in-memory config to TOML string (for save/export to backends.conf).
 pub fn config_to_toml(config: &Config) -> Result<String, toml::ser::Error> {
     let fc = FileConfig {
-        current_index: config.current_index,
         backends: Some(config.backends.clone()),
     };
     toml::to_string_pretty(&fc)
@@ -221,18 +185,6 @@ pub fn load_file_config(path: &Path) -> Result<FileConfig, Box<dyn std::error::E
 fn apply_file_config(config: &mut Config, file: &FileConfig) {
     if let Some(backends) = &file.backends {
         config.backends = backends.clone();
-        config.current_index = file
-            .current_index
-            .filter(|&i| i < config.backends.len())
-            .or(if config.backends.is_empty() {
-                None
-            } else {
-                Some(0)
-            });
-    } else if let Some(idx) = file.current_index {
-        if idx < config.backends.len() {
-            config.current_index = Some(idx);
-        }
     }
 }
 
@@ -261,41 +213,47 @@ pub fn resolve_config(
     Ok(ResolvedConfig { bind, port, config })
 }
 
-/// Shared app state: config + current backend selection (thread-safe).
+/// Shared app state: config + routing (thread-safe).
 #[derive(Clone)]
 pub struct AppState {
     pub config: Arc<RwLock<Config>>,
+    pub routing_config: Arc<RwLock<RoutingConfig>>,
+    round_robin_counter: Arc<AtomicUsize>,
 }
 
 impl AppState {
     pub fn new(config: Config) -> Self {
         Self {
             config: Arc::new(RwLock::new(config)),
+            routing_config: Arc::new(RwLock::new(RoutingConfig::default())),
+            round_robin_counter: Arc::new(AtomicUsize::new(0)),
         }
     }
 
-    /// Get current backend config (read).
-    pub async fn current_backend(&self) -> Option<BackendConfig> {
-        let c = self.config.read().await;
-        c.current_backend().cloned()
+    pub fn new_with_routing(config: Config, routing: RoutingConfig) -> Self {
+        Self {
+            config: Arc::new(RwLock::new(config)),
+            routing_config: Arc::new(RwLock::new(routing)),
+            round_robin_counter: Arc::new(AtomicUsize::new(0)),
+        }
     }
 
-    /// Set current backend by index.
-    pub async fn set_current_backend_index(&self, index: Option<usize>) -> bool {
-        let mut c = self.config.write().await;
-        c.set_current_index(index)
+    pub async fn get_routing_config(&self) -> RoutingConfig {
+        self.routing_config.read().await.clone()
+    }
+
+    pub async fn set_routing_config(&self, config: RoutingConfig) {
+        *self.routing_config.write().await = config;
+    }
+
+    pub fn next_round_robin(&self) -> usize {
+        self.round_robin_counter.fetch_add(1, Ordering::Relaxed)
     }
 
     /// List all backends (for API/UI).
     pub async fn list_backends(&self) -> Vec<BackendConfig> {
         let c = self.config.read().await;
         c.backends.clone()
-    }
-
-    /// Current selected index.
-    pub async fn current_backend_index(&self) -> Option<usize> {
-        let c = self.config.read().await;
-        c.current_index
     }
 
     /// Update backend at index.

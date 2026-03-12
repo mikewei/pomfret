@@ -21,6 +21,8 @@ pub struct WebState {
     pub store: MemoryStore,
     /// Backends config file path (default ~/.pomfret/backends.conf or -c); used when saving.
     pub backends_path: std::path::PathBuf,
+    /// Routing config file path (default ~/.pomfret/routing.conf).
+    pub routing_path: std::path::PathBuf,
     /// Sender for long-poll notifications (requests/backends changed).
     pub notify_tx: broadcast::Sender<NotifyEvent>,
 }

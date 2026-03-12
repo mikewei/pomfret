@@ -15,6 +15,7 @@ fn test_web_state(app_state: AppState, store: MemoryStore) -> WebState {
         app_state,
         store,
         backends_path: PathBuf::from("/tmp/pomfret-test-backends.conf"),
+        routing_path: PathBuf::from("/tmp/pomfret-test-routing.conf"),
         notify_tx,
     }
 }

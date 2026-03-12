@@ -653,4 +653,121 @@ body {
   transform: translate(-50%, -50%) scale(0.95);
 }
 
+/* Routing rules */
+.routing-rule-row {
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  margin-bottom: 0.5rem;
+  overflow: hidden;
+}
+.routing-rule-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.65rem 1rem;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.15s;
+}
+.routing-rule-head:hover {
+  background: var(--bg-card-hover);
+}
+.routing-rule-num {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-dim);
+  min-width: 1.8rem;
+  flex-shrink: 0;
+}
+.routing-default-badge {
+  font-size: 0.7rem;
+  padding: 0.15rem 0.45rem;
+  background: var(--accent);
+  color: #fff;
+  border-radius: 4px;
+  min-width: auto;
+}
+.routing-rule-summary {
+  flex: 1;
+  font-size: 0.88rem;
+  color: var(--text);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.routing-kw {
+  color: var(--text-muted);
+  font-weight: 500;
+}
+.routing-cond-label {
+  color: var(--accent);
+  font-weight: 500;
+}
+.routing-cond-value {
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  color: var(--text);
+}
+.routing-target-label {
+  font-weight: 500;
+  color: var(--success);
+}
+.routing-rule-chevron {
+  width: 0;
+  height: 0;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 5px solid var(--text-dim);
+  transition: transform 0.2s;
+  flex-shrink: 0;
+}
+.routing-rule-row.expanded .routing-rule-chevron {
+  transform: rotate(180deg);
+}
+.routing-rule-edit {
+  display: none;
+  padding: 0 1rem 1rem;
+  border-top: 1px solid var(--border);
+  padding-top: 1rem;
+}
+.routing-rule-row.expanded .routing-rule-edit {
+  display: block;
+}
+.routing-rule-fields {
+  display: grid;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+.routing-rule-fields label {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin-bottom: 0.25rem;
+}
+.routing-rule-fields input,
+.routing-rule-fields select {
+  width: 100%;
+  background: var(--bg-page);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0.5rem 0.65rem;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+}
+.routing-rule-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.routing-add-row {
+  margin-top: 0.5rem;
+}
+.routing-add-row .routing-btn-add {
+  width: 100%;
+  justify-content: center;
+}
+
 .hidden { display: none !important; }

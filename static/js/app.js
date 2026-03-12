@@ -130,13 +130,10 @@
     }
     list.forEach(function (b, i) {
       var typeLabel = (b.backend_type === 'ollama') ? t('backendTypeOllama') : t('backendTypeOpenAiCompat');
-      html += '<div class="backend-row' + (b.is_current ? ' current' : '') + '" data-index="' + i + '">';
+      html += '<div class="backend-row" data-index="' + i + '">';
       html += '<div class="backend-row-head" data-index="' + i + '">';
       html += '<span class="backend-row-name-wrap">';
       html += '<span class="backend-row-name">' + escapeHtml(b.name) + '</span>';
-      if (b.is_current) {
-        html += '<span class="current-badge">' + escapeHtml(t('current')) + '</span>';
-      }
       html += '</span>';
       html += '<span class="backend-row-type">' + escapeHtml(typeLabel) + '</span>';
       html += '<span class="backend-row-chevron" aria-hidden="true"></span>';
@@ -150,9 +147,6 @@
       html += '<div><label>' + escapeHtml(t('specifiedModel')) + '</label><input type="text" class="be-model" value="' + escapeHtml(b.model || '') + '" placeholder="' + escapeHtml(t('specifiedModelPlaceholder')) + '" /></div>';
       html += '</div>';
       html += '<div class="backend-actions">';
-      if (!b.is_current) {
-        html += '<button type="button" class="btn btn-secondary btn-small btn-set-current" data-index="' + i + '">' + escapeHtml(t('use')) + '</button>';
-      }
       html += '<button type="button" class="btn btn-small btn-secondary btn-save-backend" data-index="' + i + '">' + escapeHtml(t('save')) + '</button>';
       html += '<button type="button" class="btn btn-small btn-danger btn-delete-backend" data-index="' + i + '">' + escapeHtml(t('delete')) + '</button>';
       html += '</div></div>';
@@ -237,19 +231,6 @@
       };
     }
 
-    backendsListEl.querySelectorAll('.btn-set-current').forEach(function (btn) {
-      btn.onclick = function (e) {
-        e.stopPropagation();
-        var index = parseInt(btn.getAttribute('data-index'), 10);
-        fetch('/api/backends/current', {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ index: index })
-        }).then(function (r) { return r.json(); }).then(function (res) {
-          if (res.ok) loadBackendsAndStatus(true);
-        });
-      };
-    });
     backendsListEl.querySelectorAll('.btn-save-backend').forEach(function (btn) {
       btn.onclick = function (e) {
         e.stopPropagation();
@@ -315,15 +296,14 @@
 
   function renderBackendStatus(statusList) {
     if (!statusList || statusList.length === 0) {
-      backendStatusEl.innerHTML = '<tr><td colspan="5">' + escapeHtml(t('noBackendsRow')) + '</td></tr>';
+      backendStatusEl.innerHTML = '<tr><td colspan="4">' + escapeHtml(t('noBackendsRow')) + '</td></tr>';
       return;
     }
     var rows = statusList.map(function (s) {
-      var currentBadge = s.is_current ? '<span class="badge current">' + escapeHtml(t('current')) + '</span>' : '';
       var reachBadge = s.reachable ? '<span class="badge live">' + escapeHtml(t('reachableBadge')) + '</span>' : '<span class="badge down">' + escapeHtml(t('unreachableBadge')) + '</span>';
       var lastAt = s.last_request_at ? new Date(s.last_request_at * 1000).toLocaleString() : '-';
       var err = s.last_error ? (' title="' + escapeHtml(s.last_error) + '"') : '';
-      return '<tr><td>' + escapeHtml(s.name) + '</td><td>' + currentBadge + '</td><td' + err + '>' + reachBadge + '</td><td>' + s.request_count + '</td><td>' + lastAt + '</td></tr>';
+      return '<tr><td>' + escapeHtml(s.name) + '</td><td' + err + '>' + reachBadge + '</td><td>' + s.request_count + '</td><td>' + lastAt + '</td></tr>';
     }).join('');
     backendStatusEl.innerHTML = rows;
   }
@@ -353,6 +333,7 @@
     if (!force && isUserEditingBackends()) return;
     fetch('/api/backends').then(function (r) { return r.json(); }).then(function (list) {
       if (!force && isUserEditingBackends()) return;
+      _cachedBackends = list || [];
       renderBackendsList(list);
     }).catch(function () {
       showConnectionLost();
@@ -430,6 +411,285 @@
     };
   }
 
+  // --- Routing configuration ---
+  var routingRulesListEl = document.getElementById('routing-rules-list');
+  var btnExportRouting = document.getElementById('btn-export-routing');
+  var _routingConfig = { rules: [], default_target: 'first_available', default_backend_id: null };
+  var _cachedBackends = [];
+
+  function conditionLabel(ct) {
+    var m = { model: t('routingCondModel'), length: t('routingCondLength'), regex: t('routingCondRegex') };
+    return m[ct] || ct;
+  }
+
+  function conditionPlaceholder(ct) {
+    var m = { model: t('routingPlaceholderModel'), length: t('routingPlaceholderLength'), regex: t('routingPlaceholderRegex') };
+    return m[ct] || '';
+  }
+
+  function targetLabel(tgt, bid) {
+    if (tgt === 'first_available') return t('routingTargetFirst');
+    if (tgt === 'round_robin') return t('routingTargetRoundRobin');
+    if (tgt === 'specific') {
+      var b = _cachedBackends.find(function (x) { return x.id === bid; });
+      return b ? b.name : (bid || t('routingTargetSpecific'));
+    }
+    return tgt;
+  }
+
+  function buildTargetSelect(selectedTarget, selectedBackendId, idSuffix) {
+    var opts = '';
+    opts += '<option value="first_available"' + (selectedTarget === 'first_available' ? ' selected' : '') + '>' + escapeHtml(t('routingTargetFirst')) + '</option>';
+    opts += '<option value="round_robin"' + (selectedTarget === 'round_robin' ? ' selected' : '') + '>' + escapeHtml(t('routingTargetRoundRobin')) + '</option>';
+    _cachedBackends.forEach(function (b) {
+      var isSelected = selectedTarget === 'specific' && selectedBackendId === b.id;
+      opts += '<option value="specific:' + escapeHtml(b.id) + '"' + (isSelected ? ' selected' : '') + '>' + escapeHtml(b.name) + '</option>';
+    });
+    return '<select class="routing-target-select" id="routing-target-' + idSuffix + '">' + opts + '</select>';
+  }
+
+  function parseTargetValue(val) {
+    if (val === 'first_available') return { target: 'first_available', target_backend_id: null };
+    if (val === 'round_robin') return { target: 'round_robin', target_backend_id: null };
+    if (val.startsWith('specific:')) return { target: 'specific', target_backend_id: val.substring(9) };
+    return { target: 'first_available', target_backend_id: null };
+  }
+
+  function renderRoutingRules() {
+    if (!routingRulesListEl) return;
+    var rules = _routingConfig.rules || [];
+    var html = '';
+
+    rules.forEach(function (rule, i) {
+      html += '<div class="routing-rule-row" data-index="' + i + '">';
+      html += '<div class="routing-rule-head" data-index="' + i + '">';
+      html += '<span class="routing-rule-num">#' + (i + 1) + '</span>';
+      html += '<span class="routing-rule-summary">';
+      html += '<span class="routing-kw">' + escapeHtml(t('routingIf')) + '</span> ';
+      html += '<span class="routing-cond-label">' + escapeHtml(conditionLabel(rule.condition_type)) + '</span> ';
+      html += '<span class="routing-cond-value">' + escapeHtml(rule.condition_value) + '</span> ';
+      html += '<span class="routing-kw">' + escapeHtml(t('routingRouteTo')) + '</span> ';
+      html += '<span class="routing-target-label">' + escapeHtml(targetLabel(rule.target, rule.target_backend_id)) + '</span>';
+      html += '</span>';
+      html += '<span class="routing-rule-chevron" aria-hidden="true"></span>';
+      html += '</div>';
+      html += '<div class="routing-rule-edit" data-index="' + i + '">';
+      html += '<div class="routing-rule-fields">';
+      html += '<div><label>' + escapeHtml(t('routingIf')) + '</label>';
+      html += '<select class="routing-cond-type" id="routing-cond-type-' + i + '">';
+      html += '<option value="model"' + (rule.condition_type === 'model' ? ' selected' : '') + '>' + escapeHtml(t('routingCondModel')) + '</option>';
+      html += '<option value="length"' + (rule.condition_type === 'length' ? ' selected' : '') + '>' + escapeHtml(t('routingCondLength')) + '</option>';
+      html += '<option value="regex"' + (rule.condition_type === 'regex' ? ' selected' : '') + '>' + escapeHtml(t('routingCondRegex')) + '</option>';
+      html += '</select></div>';
+      html += '<div><label>' + escapeHtml(t('routingConditionValue')) + '</label>';
+      html += '<input type="text" class="routing-cond-value-input" id="routing-cond-value-' + i + '" value="' + escapeHtml(rule.condition_value) + '" placeholder="' + escapeHtml(conditionPlaceholder(rule.condition_type)) + '" /></div>';
+      html += '<div><label>' + escapeHtml(t('routingRouteTo')) + '</label>';
+      html += buildTargetSelect(rule.target, rule.target_backend_id, i);
+      html += '</div>';
+      html += '</div>';
+      html += '<div class="routing-rule-actions">';
+      if (i > 0) html += '<button type="button" class="btn btn-small btn-secondary routing-btn-up" data-index="' + i + '">' + escapeHtml(t('routingMoveUp')) + '</button>';
+      if (i < rules.length - 1) html += '<button type="button" class="btn btn-small btn-secondary routing-btn-down" data-index="' + i + '">' + escapeHtml(t('routingMoveDown')) + '</button>';
+      html += '<button type="button" class="btn btn-small btn-secondary routing-btn-save" data-index="' + i + '">' + escapeHtml(t('save')) + '</button>';
+      html += '<button type="button" class="btn btn-small btn-danger routing-btn-delete" data-index="' + i + '">' + escapeHtml(t('routingDeleteRule')) + '</button>';
+      html += '</div></div>';
+      html += '</div>';
+    });
+
+    // Default row (always present)
+    html += '<div class="routing-rule-row routing-default-row">';
+    html += '<div class="routing-rule-head routing-default-head" data-index="default">';
+    html += '<span class="routing-rule-num routing-default-badge">' + escapeHtml(t('routingDefault')) + '</span>';
+    html += '<span class="routing-rule-summary">';
+    html += '<span class="routing-kw">' + escapeHtml(t('routingRouteTo')) + '</span> ';
+    html += '<span class="routing-target-label">' + escapeHtml(targetLabel(_routingConfig.default_target, _routingConfig.default_backend_id)) + '</span>';
+    html += '</span>';
+    html += '<span class="routing-rule-chevron" aria-hidden="true"></span>';
+    html += '</div>';
+    html += '<div class="routing-rule-edit" data-index="default">';
+    html += '<div class="routing-rule-fields">';
+    html += '<div><label>' + escapeHtml(t('routingRouteTo')) + '</label>';
+    html += buildTargetSelect(_routingConfig.default_target, _routingConfig.default_backend_id, 'default');
+    html += '</div>';
+    html += '</div>';
+    html += '<div class="routing-rule-actions">';
+    html += '<button type="button" class="btn btn-small btn-secondary routing-btn-save" data-index="default">' + escapeHtml(t('save')) + '</button>';
+    html += '</div></div>';
+    html += '</div>';
+
+    // Add rule button
+    html += '<div class="routing-add-row">';
+    html += '<button type="button" class="btn btn-secondary routing-btn-add" id="routing-btn-add">' + escapeHtml(t('routingAddRule')) + '</button>';
+    html += '</div>';
+
+    routingRulesListEl.innerHTML = html;
+    bindRoutingEvents();
+  }
+
+  function bindRoutingEvents() {
+    // Update placeholder when condition type changes
+    routingRulesListEl.querySelectorAll('.routing-cond-type').forEach(function (sel) {
+      sel.onchange = function () {
+        var idx = sel.id.replace('routing-cond-type-', '');
+        var valInput = document.getElementById('routing-cond-value-' + idx);
+        if (valInput) valInput.placeholder = conditionPlaceholder(sel.value);
+      };
+    });
+
+    // Expand/collapse
+    routingRulesListEl.querySelectorAll('.routing-rule-head').forEach(function (head) {
+      head.onclick = function () {
+        var row = head.parentElement;
+        var wasExpanded = row.classList.contains('expanded');
+        routingRulesListEl.querySelectorAll('.routing-rule-row').forEach(function (r) { r.classList.remove('expanded'); });
+        if (!wasExpanded) row.classList.add('expanded');
+      };
+    });
+
+    // Move up
+    routingRulesListEl.querySelectorAll('.routing-btn-up').forEach(function (btn) {
+      btn.onclick = function (e) {
+        e.stopPropagation();
+        var i = parseInt(btn.getAttribute('data-index'), 10);
+        if (i > 0) {
+          collectRuleEdits();
+          var tmp = _routingConfig.rules[i];
+          _routingConfig.rules[i] = _routingConfig.rules[i - 1];
+          _routingConfig.rules[i - 1] = tmp;
+          renderRoutingRules();
+        }
+      };
+    });
+
+    // Move down
+    routingRulesListEl.querySelectorAll('.routing-btn-down').forEach(function (btn) {
+      btn.onclick = function (e) {
+        e.stopPropagation();
+        var i = parseInt(btn.getAttribute('data-index'), 10);
+        if (i < _routingConfig.rules.length - 1) {
+          collectRuleEdits();
+          var tmp = _routingConfig.rules[i];
+          _routingConfig.rules[i] = _routingConfig.rules[i + 1];
+          _routingConfig.rules[i + 1] = tmp;
+          renderRoutingRules();
+        }
+      };
+    });
+
+    // Delete
+    routingRulesListEl.querySelectorAll('.routing-btn-delete').forEach(function (btn) {
+      btn.onclick = function (e) {
+        e.stopPropagation();
+        var i = parseInt(btn.getAttribute('data-index'), 10);
+        collectRuleEdits();
+        _routingConfig.rules.splice(i, 1);
+        renderRoutingRules();
+      };
+    });
+
+    // Save (per-rule)
+    routingRulesListEl.querySelectorAll('.routing-btn-save').forEach(function (btn) {
+      btn.onclick = function (e) {
+        e.stopPropagation();
+        saveRoutingConfig().then(function () {
+          renderRoutingRules();
+        });
+      };
+    });
+
+    // Add rule
+    var btnAdd = document.getElementById('routing-btn-add');
+    if (btnAdd) {
+      btnAdd.onclick = function () {
+        collectRuleEdits();
+        _routingConfig.rules.push({ condition_type: 'model', condition_value: '', target: 'first_available', target_backend_id: null });
+        renderRoutingRules();
+        var lastIdx = _routingConfig.rules.length - 1;
+        var lastRow = routingRulesListEl.querySelector('.routing-rule-row[data-index="' + lastIdx + '"]');
+        if (lastRow) lastRow.classList.add('expanded');
+      };
+    }
+  }
+
+  function collectRuleEdits() {
+    (_routingConfig.rules || []).forEach(function (rule, i) {
+      var condType = document.getElementById('routing-cond-type-' + i);
+      var condVal = document.getElementById('routing-cond-value-' + i);
+      var targetSel = document.getElementById('routing-target-' + i);
+      if (condType) rule.condition_type = condType.value;
+      if (condVal) rule.condition_value = condVal.value;
+      if (targetSel) {
+        var parsed = parseTargetValue(targetSel.value);
+        rule.target = parsed.target;
+        rule.target_backend_id = parsed.target_backend_id;
+      }
+    });
+    var defaultTarget = document.getElementById('routing-target-default');
+    if (defaultTarget) {
+      var parsed = parseTargetValue(defaultTarget.value);
+      _routingConfig.default_target = parsed.target;
+      _routingConfig.default_backend_id = parsed.target_backend_id;
+    }
+  }
+
+  function loadRoutingConfig() {
+    fetch('/api/routing').then(function (r) { return r.json(); }).then(function (data) {
+      _routingConfig = data || { rules: [], default_target: 'first_available', default_backend_id: null };
+      renderRoutingRules();
+    }).catch(function () {});
+  }
+
+  function saveRoutingConfig() {
+    collectRuleEdits();
+    var body = {
+      rules: (_routingConfig.rules || []).map(function (r) {
+        var obj = { condition_type: r.condition_type, condition_value: r.condition_value, target: r.target };
+        if (r.target_backend_id) obj.target_backend_id = r.target_backend_id;
+        return obj;
+      }),
+      default_target: _routingConfig.default_target
+    };
+    if (_routingConfig.default_backend_id) body.default_backend_id = _routingConfig.default_backend_id;
+    return fetch('/api/routing', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    }).then(function (r) { return r.json(); }).then(function (res) {
+      if (res.ok) {
+        showToast(t('routingSaved'));
+      } else {
+        showToast(t('routingSaveFailed'));
+      }
+      return res;
+    }).catch(function () {
+      showToast(t('routingSaveFailed'));
+    });
+  }
+
+  if (btnExportRouting) {
+    btnExportRouting.onclick = function () {
+      fetch('/api/routing/export').then(function (r) {
+        if (!r.ok) return r.json().then(function (j) { throw new Error(j.error || r.statusText); });
+        return r.blob();
+      }).then(function (blob) {
+        var a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = 'routing.conf';
+        a.click();
+        URL.revokeObjectURL(a.href);
+      }).catch(function (err) {
+        showToast(t('routingSaveFailed'));
+      });
+    };
+  }
+
+  // Cache backends for target select
+  function updateCachedBackends() {
+    fetch('/api/backends').then(function (r) { return r.json(); }).then(function (list) {
+      _cachedBackends = list || [];
+    }).catch(function () {});
+  }
+
   document.addEventListener('i18n:changed', function () {
     t = window.i18n && window.i18n.t ? window.i18n.t : function (k) { return k; };
     if (window.Inspection) window.Inspection.setT(t);
@@ -439,6 +699,7 @@
     }
     loadBackendsAndStatus(true);
     loadRequests();
+    loadRoutingConfig();
     renderVersionInfo();
     if (window.Inspection && window.Inspection.getSelectedId()) window.Inspection.refreshDetail();
   });
@@ -528,6 +789,8 @@
     loadBackendsAndStatus(true);
     loadRequests();
     loadBackendVersion();
+    updateCachedBackends();
+    loadRoutingConfig();
     renderVersionInfo();
     startNotifyPoll();
     setInterval(function () {

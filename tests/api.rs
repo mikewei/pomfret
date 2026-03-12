@@ -1,4 +1,4 @@
-//! Console API tests: /api/requests, /api/backends, /api/backends/current.
+//! Console API tests: /api/requests, /api/backends.
 
 use axum::body::Body;
 use axum::http::Request;
@@ -18,12 +18,13 @@ fn make_state() -> WebState {
         app_state,
         store,
         backends_path: PathBuf::from("/tmp/pomfret-test-backends.conf"),
+        routing_path: PathBuf::from("/tmp/pomfret-test-routing.conf"),
         notify_tx,
     }
 }
 
 #[tokio::test]
-async fn api_backends_lists_and_current() {
+async fn api_backends_list_and_add() {
     let app = router(make_state());
 
     let req = Request::builder().uri("/api/backends").body(Body::empty()).unwrap();
@@ -35,9 +36,7 @@ async fn api_backends_lists_and_current() {
     assert_eq!(list[0]["id"], "ollama");
     assert_eq!(list[0]["name"], "Ollama");
     assert_eq!(list[0]["backend_type"], "ollama");
-    assert_eq!(list[0]["is_current"], true);
 
-    // Add a second backend then switch current to it
     let req = Request::builder()
         .method("POST")
         .uri("/api/backends")
@@ -49,20 +48,12 @@ async fn api_backends_lists_and_current() {
     let res = app.clone().oneshot(req).await.unwrap();
     assert!(res.status().is_success());
 
-    let req = Request::builder()
-        .method("PUT")
-        .uri("/api/backends/current")
-        .header("Content-Type", "application/json")
-        .body(Body::from(r#"{"index":1}"#))
-        .unwrap();
-    let res = app.clone().oneshot(req).await.unwrap();
-    assert!(res.status().is_success());
-
     let req = Request::builder().uri("/api/backends").body(Body::empty()).unwrap();
     let res = app.oneshot(req).await.unwrap();
     let bytes = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
     let list: Vec<serde_json::Value> = serde_json::from_slice(&bytes).unwrap();
-    assert_eq!(list[1]["is_current"], true);
+    assert_eq!(list.len(), 2);
+    assert_eq!(list[1]["name"], "OpenAI");
 }
 
 #[tokio::test]

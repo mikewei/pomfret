@@ -15,6 +15,7 @@ fn test_web_state(app_state: AppState, store: MemoryStore) -> WebState {
         app_state,
         store,
         backends_path: PathBuf::from("/tmp/pomfret-test-backends.conf"),
+        routing_path: PathBuf::from("/tmp/pomfret-test-routing.conf"),
         notify_tx,
     }
 }
@@ -40,7 +41,7 @@ async fn chat_completions_503_when_no_backend() {
     assert_eq!(res.status(), StatusCode::SERVICE_UNAVAILABLE);
     let bytes = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
     let s = std::str::from_utf8(&bytes).unwrap();
-    assert!(s.contains("No backend selected"));
+    assert!(s.contains("No backend available"));
 }
 
 #[tokio::test]
@@ -56,7 +57,6 @@ async fn chat_completions_forwards_to_backend_and_records() {
     };
     let config = Config {
         backends: vec![backend],
-        current_index: Some(0),
     };
     let app_state = AppState::new(config);
     let store = MemoryStore::new(100);
@@ -109,7 +109,6 @@ async fn get_models_forwards_to_backend() {
     };
     let config = Config {
         backends: vec![backend],
-        current_index: Some(0),
     };
     let app_state = AppState::new(config);
     let store = MemoryStore::new(100);

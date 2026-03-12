@@ -1,4 +1,4 @@
-//! Console API: list requests, get one request, list backends, set current backend, backend status, config save/export, long-poll notify.
+//! Console API: list requests, get one request, list backends, backend status, config save/export, routing, long-poll notify.
 
 use axum::extract::{Path, Query, State};
 use axum::http::header;
@@ -6,6 +6,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, put};
 use axum::{Json, Router};
 use crate::config::{write_config_to_path, BackendConfig, BackendType, Config};
+use crate::routing::{save_routing_config, RoutingConfig};
 use crate::web::WebState;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -48,7 +49,6 @@ pub struct BackendListItem {
     api_key_set: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     model: Option<String>,
-    is_current: bool,
 }
 
 #[derive(Serialize)]
@@ -56,7 +56,6 @@ pub struct BackendStatusItem {
     id: String,
     name: String,
     base_url: String,
-    is_current: bool,
     reachable: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     last_error: Option<String>,
@@ -87,10 +86,11 @@ pub fn router(state: WebState) -> Router<WebState> {
         .route("/notify", get(notify))
         .route("/backends", get(list_backends).post(create_backend))
         .route("/backends/status", get(backends_status))
-        .route("/backends/current", put(set_current_backend))
         .route("/backends/:index", put(update_backend).delete(delete_backend))
         .route("/config/save", axum::routing::post(config_save))
         .route("/config/export", get(config_export))
+        .route("/routing", get(get_routing).put(update_routing))
+        .route("/routing/export", get(routing_export))
         .route("/version", get(version))
         .with_state(state)
 }
@@ -178,18 +178,15 @@ async fn get_request(
 
 async fn list_backends(State(state): State<WebState>) -> Json<Vec<BackendListItem>> {
     let backends = state.app_state.list_backends().await;
-    let current = state.app_state.current_backend_index().await;
     let items = backends
         .into_iter()
-        .enumerate()
-        .map(|(i, b)| BackendListItem {
+        .map(|b| BackendListItem {
             api_key_set: Some(b.api_key.as_ref().map(|k| !k.is_empty()).unwrap_or(false)),
             model: b.model.clone(),
             id: b.id,
             name: b.name,
             base_url: b.base_url,
             backend_type: b.backend_type.clone(),
-            is_current: current == Some(i),
         })
         .collect();
     Json(items)
@@ -220,17 +217,15 @@ async fn probe_backend(b: &BackendConfig) -> (bool, Option<String>) {
 
 async fn backends_status(State(state): State<WebState>) -> Json<Vec<BackendStatusItem>> {
     let backends = state.app_state.list_backends().await;
-    let current = state.app_state.current_backend_index().await;
     let stats = state.store.get_stats().await;
     let mut items = Vec::with_capacity(backends.len());
-    for (i, b) in backends.into_iter().enumerate() {
+    for b in backends.into_iter() {
         let (reachable, last_error) = probe_backend(&b).await;
         let bs = stats.by_backend.get(&b.id).cloned().unwrap_or_default();
         items.push(BackendStatusItem {
             id: b.id,
             name: b.name,
             base_url: b.base_url,
-            is_current: current == Some(i),
             reachable,
             last_error: if reachable { None } else { last_error },
             request_count: bs.count,
@@ -242,22 +237,6 @@ async fn backends_status(State(state): State<WebState>) -> Json<Vec<BackendStatu
         });
     }
     Json(items)
-}
-
-#[derive(serde::Deserialize)]
-struct SetCurrentBody {
-    index: Option<usize>,
-}
-
-async fn set_current_backend(
-    State(state): State<WebState>,
-    Json(body): Json<SetCurrentBody>,
-) -> Json<serde_json::Value> {
-    let ok = state.app_state.set_current_backend_index(body.index).await;
-    if ok {
-        let _ = state.notify_tx.send(NotifyEvent::Backends);
-    }
-    Json(serde_json::json!({ "ok": ok }))
 }
 
 #[derive(Deserialize)]
@@ -352,13 +331,49 @@ async fn config_save(
         return Json(serde_json::json!({ "ok": false, "error": "invalid action" }));
     }
     let backends = state.app_state.list_backends().await;
-    let current_index = state.app_state.current_backend_index().await;
     let mut config = Config::default_empty();
     config.backends = backends;
-    config.current_index = current_index;
     match write_config_to_path(&state.backends_path, &config) {
         Ok(()) => Json(serde_json::json!({ "ok": true })),
         Err(e) => Json(serde_json::json!({ "ok": false, "error": e.to_string() })),
+    }
+}
+
+async fn get_routing(State(state): State<WebState>) -> Json<RoutingConfig> {
+    let config = state.app_state.get_routing_config().await;
+    Json(config)
+}
+
+async fn update_routing(
+    State(state): State<WebState>,
+    Json(body): Json<RoutingConfig>,
+) -> Json<serde_json::Value> {
+    state.app_state.set_routing_config(body.clone()).await;
+    match save_routing_config(&state.routing_path, &body) {
+        Ok(()) => Json(serde_json::json!({ "ok": true })),
+        Err(e) => Json(serde_json::json!({ "ok": false, "error": e.to_string() })),
+    }
+}
+
+async fn routing_export(State(state): State<WebState>) -> Response {
+    let config = state.app_state.get_routing_config().await;
+    match toml::to_string_pretty(&config) {
+        Ok(toml) => (
+            [
+                (header::CONTENT_TYPE, "application/toml; charset=utf-8"),
+                (
+                    header::CONTENT_DISPOSITION,
+                    "attachment; filename=\"routing.conf\"",
+                ),
+            ],
+            toml,
+        )
+            .into_response(),
+        Err(e) => (
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "ok": false, "error": e.to_string() })),
+        )
+            .into_response(),
     }
 }
 
@@ -368,10 +383,8 @@ async fn version() -> Json<serde_json::Value> {
 
 async fn config_export(State(state): State<WebState>) -> Response {
     let backends = state.app_state.list_backends().await;
-    let current_index = state.app_state.current_backend_index().await;
     let mut config = Config::default_empty();
     config.backends = backends;
-    config.current_index = current_index;
     match crate::config::config_to_toml(&config) {
         Ok(toml) => (
             [

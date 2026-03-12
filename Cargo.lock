@@ -1116,6 +1116,7 @@ dependencies = [
  "http-body",
  "http-body-util",
  "mime_guess",
+ "regex",
  "reqwest",
  "rust-embed",
  "serde",

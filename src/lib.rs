@@ -6,5 +6,6 @@ pub mod config;
 pub mod embed;
 pub mod providers;
 pub mod proxy;
+pub mod routing;
 pub mod store;
 pub mod web;

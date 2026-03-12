@@ -1,6 +1,7 @@
 //! OpenAI-compatible API handlers: parse request, call backend, return response.
 
 use crate::providers::{create_provider, ProviderError, ProviderResponse};
+use crate::routing::resolve_backend;
 use crate::store::RequestRecord;
 use crate::web::{NotifyEvent, WebState};
 use axum::body::Body;
@@ -173,14 +174,29 @@ pub async fn handle_chat_completions(
     let request_query = parts.uri.query().map(|s| s.to_string());
     let request_headers = request_headers_json(&parts.headers);
 
-    let backend = match state.app_state.current_backend().await {
+    let req_body_str = String::from_utf8_lossy(&body).to_string();
+    let stream = serde_json::from_str::<ChatRequestMin>(&req_body_str)
+        .map(|r| r.stream)
+        .unwrap_or(false);
+    let model = serde_json::from_str::<ChatRequestMin>(&req_body_str)
+        .ok()
+        .and_then(|r| r.model);
+
+    let backend = match resolve_backend(
+        &state.app_state,
+        model.as_deref(),
+        Some(&req_body_str),
+        body.len(),
+    )
+    .await
+    {
         Some(b) => b,
         None => {
-            tracing::warn!("chat completions called but no backend selected");
+            tracing::warn!("chat completions called but no backend available via routing");
             return (
                 StatusCode::SERVICE_UNAVAILABLE,
                 [("Content-Type", "application/json")],
-                r#"{"error":{"message":"No backend selected","type":"gateway_error"}}"#,
+                r#"{"error":{"message":"No backend available","type":"gateway_error"}}"#,
             )
                 .into_response();
         }
@@ -197,14 +213,6 @@ pub async fn handle_chat_completions(
     } else {
         body
     };
-
-    let req_body_str = String::from_utf8_lossy(&body).to_string();
-    let stream = serde_json::from_str::<ChatRequestMin>(&req_body_str)
-        .map(|r| r.stream)
-        .unwrap_or(false);
-    let model = serde_json::from_str::<ChatRequestMin>(&req_body_str)
-        .ok()
-        .and_then(|r| r.model);
 
     tracing::info!(
         model = model.as_deref().unwrap_or("-"),
@@ -338,7 +346,7 @@ pub async fn handle_chat_completions(
     }
 }
 
-/// GET /v1/models — forward to current backend; return 503 if no backend.
+/// GET /v1/models — forward to default routing backend; return 503 if no backend.
 #[tracing::instrument(skip(state, request))]
 pub async fn handle_models(
     State(state): State<WebState>,
@@ -347,14 +355,14 @@ pub async fn handle_models(
     let (parts, _) = request.into_parts();
     let request_query = parts.uri.query().map(|s| s.to_string());
     let request_headers = request_headers_json(&parts.headers);
-    let backend = match state.app_state.current_backend().await {
+    let backend = match resolve_backend(&state.app_state, None, None, 0).await {
         Some(b) => b,
         None => {
-            tracing::warn!("GET /v1/models called but no backend selected");
+            tracing::warn!("GET /v1/models called but no backend available");
             return (
                 StatusCode::SERVICE_UNAVAILABLE,
                 [("Content-Type", "application/json")],
-                r#"{"error":{"message":"No backend selected","type":"gateway_error"}}"#,
+                r#"{"error":{"message":"No backend available","type":"gateway_error"}}"#,
             )
                 .into_response();
         }

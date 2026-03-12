@@ -78,6 +78,15 @@
           <p class="card-desc" data-i18n="backendsDesc">Configure and select the backend to forward to; edit Base URL and API Key.</p>
           <div id="backends-list"></div>
         </section>
+
+        <section id="section-routing" class="card">
+          <div class="card-title-row">
+            <h2 class="card-title" data-i18n="routingTitle">Routing configuration</h2>
+            <button type="button" class="btn btn-secondary btn-small" id="btn-export-routing" data-i18n="export">Export</button>
+          </div>
+          <p class="card-desc" data-i18n="routingDesc">Route requests to backends based on conditions. Rules are evaluated top-to-bottom; the first match wins.</p>
+          <div id="routing-rules-list"></div>
+        </section>
       </div>
 
       <div id="panel-dashboard" class="tab-panel" role="tabpanel" hidden>
@@ -93,7 +102,7 @@
           <div class="table-wrap">
             <table class="data-table">
               <thead>
-                <tr><th data-i18n="name">Name</th><th data-i18n="current">Current</th><th data-i18n="reachable">Reachable</th><th data-i18n="requests">Requests</th><th data-i18n="lastRequest">Last request</th></tr>
+                <tr><th data-i18n="name">Name</th><th data-i18n="reachable">Reachable</th><th data-i18n="requests">Requests</th><th data-i18n="lastRequest">Last request</th></tr>
               </thead>
               <tbody id="backend-status"></tbody>
             </table>
