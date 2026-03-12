@@ -12,9 +12,10 @@ async fn chat_completions_non_stream_returns_body() {
     let config = BackendConfig {
         id: "test".to_string(),
         name: "Test".to_string(),
-        base_url: server.uri(),
+        base_url: format!("{}/v1", server.uri()),
         api_key: None,
         backend_type: BackendType::Ollama,
+        model: None,
     };
     let provider = create_provider(config).unwrap();
 
@@ -42,9 +43,10 @@ async fn chat_completions_sends_auth_header_when_api_key_set() {
     let config = BackendConfig {
         id: "test".to_string(),
         name: "Test".to_string(),
-        base_url: server.uri(),
+        base_url: format!("{}/v1", server.uri()),
         api_key: Some("sk-secret".to_string()),
         backend_type: BackendType::OpenAiCompat,
+        model: None,
     };
     let provider = create_provider(config).unwrap();
 
@@ -65,9 +67,10 @@ async fn chat_completions_returns_error_on_4xx() {
     let config = BackendConfig {
         id: "test".to_string(),
         name: "Test".to_string(),
-        base_url: server.uri(),
+        base_url: format!("{}/v1", server.uri()),
         api_key: None,
         backend_type: BackendType::Ollama,
+        model: None,
     };
     let provider = create_provider(config).unwrap();
 

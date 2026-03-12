@@ -89,11 +89,39 @@
       if (navigator.clipboard && navigator.clipboard.writeText) {
         navigator.clipboard.writeText(text).then(function () {
           copyBtn.textContent = 'Copied!';
+          copyBtn.blur();
           setTimeout(function () { copyBtn.textContent = 'Copy'; }, 1200);
         });
+      } else {
+        copyBtn.blur();
       }
     };
     valueWrap.appendChild(copyBtn);
+
+    var floatingThreshold = 30;
+    valueWrap.onmousemove = function (e) {
+      var rect = valueWrap.getBoundingClientRect();
+      if (rect.height > floatingThreshold) {
+        var relY = e.clientY - rect.top - 9;
+        relY = Math.max(0, Math.min(relY, rect.height - 18));
+        copyBtn.style.position = 'absolute';
+        copyBtn.style.right = '0';
+        copyBtn.style.top = relY + 'px';
+        copyBtn.style.marginLeft = '0';
+      } else {
+        copyBtn.style.position = '';
+        copyBtn.style.right = '';
+        copyBtn.style.top = '';
+        copyBtn.style.marginLeft = '';
+      }
+    };
+    valueWrap.onmouseleave = function () {
+      copyBtn.style.position = '';
+      copyBtn.style.right = '';
+      copyBtn.style.top = '';
+      copyBtn.style.marginLeft = '';
+    };
+
     line.appendChild(valueWrap);
   }
 

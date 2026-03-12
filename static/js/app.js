@@ -1,6 +1,25 @@
 (function () {
   var FRONTEND_VERSION = '0.1.0';
   var t = window.i18n && window.i18n.t ? window.i18n.t : function (k) { return k; };
+
+  var _toastTimer;
+  function showToast(msg) {
+    var el = document.getElementById('toast');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'toast';
+      el.className = 'toast';
+      document.body.appendChild(el);
+    }
+    clearTimeout(_toastTimer);
+    el.textContent = msg;
+    el.classList.remove('toast-hide');
+    el.classList.add('toast-visible');
+    _toastTimer = setTimeout(function () {
+      el.classList.add('toast-hide');
+      el.classList.remove('toast-visible');
+    }, 1500);
+  }
   const gatewayUrlEl = document.getElementById('gateway-url');
   const curlChatEl = document.getElementById('curl-chat');
   const curlModelsEl = document.getElementById('curl-models');
@@ -129,6 +148,7 @@
       html += '<div><label>' + escapeHtml(t('backendType')) + '</label><select class="be-backend-type"><option value="ollama"' + (b.backend_type === 'ollama' ? ' selected' : '') + '>' + escapeHtml(t('backendTypeOllama')) + '</option><option value="openai_compat"' + (b.backend_type === 'openai_compat' ? ' selected' : '') + '>' + escapeHtml(t('backendTypeOpenAiCompat')) + '</option></select></div>';
       html += '<div><label>' + escapeHtml(t('baseUrl')) + '</label><input type="text" class="be-base-url" value="' + escapeHtml(b.base_url) + '" placeholder="https://api.openai.com" /></div>';
       html += '<div><label>' + escapeHtml(t('apiKeyLabel')) + '</label><input type="password" class="be-api-key" placeholder="' + escapeHtml(b.api_key_set ? t('apiKeySet') : t('apiKeyNotSet')) + '" autocomplete="off" /></div>';
+      html += '<div><label>' + escapeHtml(t('specifiedModel')) + '</label><input type="text" class="be-model" value="' + escapeHtml(b.model || '') + '" placeholder="' + escapeHtml(t('specifiedModelPlaceholder')) + '" /></div>';
       html += '</div>';
       html += '<div class="backend-actions">';
       if (!b.is_current) {
@@ -147,6 +167,7 @@
     html += '<div><label>' + escapeHtml(t('backendType')) + '</label><select class="be-backend-type" id="new-be-backend-type"><option value="ollama">' + escapeHtml(t('backendTypeOllama')) + '</option><option value="openai_compat" selected>' + escapeHtml(t('backendTypeOpenAiCompat')) + '</option></select></div>';
     html += '<div><label>' + escapeHtml(t('baseUrl')) + '</label><input type="text" class="be-base-url" id="new-be-base-url" placeholder="https://api.openai.com" /></div>';
     html += '<div><label>' + escapeHtml(t('apiKeyLabel')) + '</label><input type="password" class="be-api-key" id="new-be-api-key" placeholder="' + escapeHtml(t('apiKeyNotSet')) + '" autocomplete="off" /></div>';
+    html += '<div><label>' + escapeHtml(t('specifiedModel')) + '</label><input type="text" class="be-model" id="new-be-model" placeholder="' + escapeHtml(t('specifiedModelPlaceholder')) + '" /></div>';
     html += '</div>';
     html += '<div class="backend-actions">';
     html += '<button type="button" class="btn btn-small btn-secondary btn-save-new-backend" id="btn-save-new-backend">' + escapeHtml(t('save')) + '</button>';
@@ -181,6 +202,7 @@
             document.getElementById('new-be-name').value = '';
             document.getElementById('new-be-base-url').value = '';
             document.getElementById('new-be-api-key').value = '';
+            document.getElementById('new-be-model').value = '';
           }
         }
       };
@@ -192,11 +214,13 @@
         var name = (document.getElementById('new-be-name') || {}).value.trim();
         var baseUrl = (document.getElementById('new-be-base-url') || {}).value.trim();
         var apiKey = (document.getElementById('new-be-api-key') || {}).value;
+        var modelVal = (document.getElementById('new-be-model') || {}).value.trim();
         var backendTypeEl = document.getElementById('new-be-backend-type');
         var backendType = backendTypeEl ? backendTypeEl.value : 'openai_compat';
         if (!name || !baseUrl) return;
         var body = { name: name, base_url: baseUrl, backend_type: backendType };
         if (apiKey !== '') body.api_key = apiKey;
+        if (modelVal !== '') body.model = modelVal;
         fetch('/api/backends', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -204,6 +228,7 @@
         }).then(function (r) { return r.json(); }).then(function (res) {
           if (res.ok) {
             saveConfigToFile().then(function () {
+              showToast(t('backendSaved'));
               var editNew = document.getElementById('backend-edit-new');
               if (editNew) editNew.hidden = true;
               loadBackendsAndStatus(true);
@@ -235,18 +260,24 @@
         var name = row.querySelector('.be-name').value.trim();
         var baseUrl = row.querySelector('.be-base-url').value.trim();
         var apiKey = row.querySelector('.be-api-key').value;
+        var modelEl = row.querySelector('.be-model');
+        var modelVal = modelEl ? modelEl.value.trim() : undefined;
         var backendTypeEl = row.querySelector('.be-backend-type');
         var backendType = backendTypeEl ? backendTypeEl.value : undefined;
         var body = { name: name || undefined, base_url: baseUrl || undefined };
         if (backendType) body.backend_type = backendType;
         if (apiKey !== '') body.api_key = apiKey;
+        if (modelVal !== undefined) body.model = modelVal;
         fetch('/api/backends/' + index, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body)
         }).then(function (r) { return r.json(); }).then(function (res) {
           if (res.ok) {
-            saveConfigToFile().then(function () { loadBackendsAndStatus(true); });
+            saveConfigToFile().then(function () {
+              showToast(t('backendSaved'));
+              loadBackendsAndStatus(true);
+            });
           }
         });
       };

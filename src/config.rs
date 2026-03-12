@@ -29,6 +29,9 @@ pub struct BackendConfig {
     pub api_key: Option<String>,
     #[serde(default = "default_backend_type")]
     pub backend_type: BackendType,
+    /// If set, override the model in every request forwarded to this backend.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
 }
 
 fn default_backend_type() -> BackendType {
@@ -59,9 +62,10 @@ impl Config {
             backends: vec![BackendConfig {
                 id: "ollama".to_string(),
                 name: "Ollama".to_string(),
-                base_url: "http://127.0.0.1:11434".to_string(),
+                base_url: "http://127.0.0.1:11434/v1".to_string(),
                 api_key: None,
                 backend_type: BackendType::Ollama,
+                model: None,
             }],
             current_index: Some(0),
         }
@@ -95,6 +99,7 @@ impl Config {
         base_url: Option<String>,
         api_key: Option<String>,
         backend_type: Option<BackendType>,
+        model: Option<Option<String>>,
     ) -> bool {
         let Some(b) = self.backends.get_mut(index) else {
             return false;
@@ -110,6 +115,9 @@ impl Config {
         }
         if let Some(t) = backend_type {
             b.backend_type = t;
+        }
+        if let Some(m) = model {
+            b.model = m;
         }
         true
     }
@@ -143,6 +151,7 @@ impl Config {
         base_url: String,
         api_key: Option<String>,
         backend_type: Option<BackendType>,
+        model: Option<String>,
     ) -> bool {
         let id = Uuid::new_v4().to_string();
         self.backends.push(BackendConfig {
@@ -151,6 +160,7 @@ impl Config {
             base_url,
             api_key,
             backend_type: backend_type.unwrap_or(BackendType::OpenAiCompat),
+            model,
         });
         true
     }
@@ -296,9 +306,10 @@ impl AppState {
         base_url: Option<String>,
         api_key: Option<String>,
         backend_type: Option<BackendType>,
+        model: Option<Option<String>>,
     ) -> bool {
         let mut c = self.config.write().await;
-        c.update_backend(index, name, base_url, api_key, backend_type)
+        c.update_backend(index, name, base_url, api_key, backend_type, model)
     }
 
     /// Add a new backend.
@@ -308,9 +319,10 @@ impl AppState {
         base_url: String,
         api_key: Option<String>,
         backend_type: Option<BackendType>,
+        model: Option<String>,
     ) -> bool {
         let mut c = self.config.write().await;
-        c.add_backend(name, base_url, api_key, backend_type)
+        c.add_backend(name, base_url, api_key, backend_type, model)
     }
 
     /// Delete backend at index.

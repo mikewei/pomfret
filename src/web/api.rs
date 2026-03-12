@@ -46,6 +46,8 @@ pub struct BackendListItem {
     pub backend_type: BackendType,
     #[serde(skip_serializing_if = "Option::is_none")]
     api_key_set: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    model: Option<String>,
     is_current: bool,
 }
 
@@ -182,6 +184,7 @@ async fn list_backends(State(state): State<WebState>) -> Json<Vec<BackendListIte
         .enumerate()
         .map(|(i, b)| BackendListItem {
             api_key_set: Some(b.api_key.as_ref().map(|k| !k.is_empty()).unwrap_or(false)),
+            model: b.model.clone(),
             id: b.id,
             name: b.name,
             base_url: b.base_url,
@@ -192,9 +195,9 @@ async fn list_backends(State(state): State<WebState>) -> Json<Vec<BackendListIte
     Json(items)
 }
 
-/// Probe backend: GET base_url/v1/models with short timeout.
+/// Probe backend: GET base_url/models with short timeout.
 async fn probe_backend(b: &BackendConfig) -> (bool, Option<String>) {
-    let url = format!("{}/v1/models", b.base_url.trim_end_matches('/'));
+    let url = format!("{}/models", b.base_url.trim_end_matches('/'));
     let client = match reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(5))
         .build()
@@ -264,6 +267,8 @@ struct CreateBackendBody {
     api_key: Option<String>,
     #[serde(default)]
     backend_type: Option<BackendType>,
+    #[serde(default)]
+    model: Option<String>,
 }
 
 async fn create_backend(
@@ -275,6 +280,7 @@ async fn create_backend(
     if name.is_empty() || base_url.is_empty() {
         return Json(serde_json::json!({ "ok": false, "error": "name and base_url required" }));
     }
+    let model = body.model.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
     let ok = state
         .app_state
         .add_backend(
@@ -282,6 +288,7 @@ async fn create_backend(
             base_url,
             body.api_key.map(|s| s.trim().to_string()),
             body.backend_type,
+            model,
         )
         .await;
     if ok {
@@ -296,6 +303,8 @@ struct UpdateBackendBody {
     base_url: Option<String>,
     api_key: Option<String>,
     backend_type: Option<BackendType>,
+    /// Sent as `""` to clear, omitted to leave unchanged.
+    model: Option<String>,
 }
 
 async fn update_backend(
@@ -303,6 +312,10 @@ async fn update_backend(
     Path(index): Path<usize>,
     Json(body): Json<UpdateBackendBody>,
 ) -> Json<serde_json::Value> {
+    let model_update = body.model.map(|s| {
+        let trimmed = s.trim().to_string();
+        if trimmed.is_empty() { None } else { Some(trimmed) }
+    });
     let ok = state
         .app_state
         .update_backend(
@@ -311,6 +324,7 @@ async fn update_backend(
             body.base_url,
             body.api_key,
             body.backend_type,
+            model_update,
         )
         .await;
     if ok {

@@ -41,7 +41,8 @@ impl LlmProvider for OpenAiCompatProvider {
         body: Bytes,
         stream: bool,
     ) -> Result<ProviderResponse, ProviderError> {
-        let url = format!("{}/v1/chat/completions", self.base_url());
+        let url = format!("{}/chat/completions", self.base_url());
+        tracing::info!(url = %url, stream = stream, "sending chat completions to upstream");
         let mut req = self
             .client
             .post(&url)
@@ -54,6 +55,7 @@ impl LlmProvider for OpenAiCompatProvider {
 
         let res = req.send().await.map_err(ProviderError::Request)?;
         let status = res.status();
+        tracing::info!(url = %url, status = %status, "upstream responded");
 
         if !status.is_success() {
             let body = res.text().await.unwrap_or_default();
@@ -72,13 +74,15 @@ impl LlmProvider for OpenAiCompatProvider {
     }
 
     async fn get_models(&self) -> Result<Bytes, ProviderError> {
-        let url = format!("{}/v1/models", self.base_url());
+        let url = format!("{}/models", self.base_url());
+        tracing::info!(url = %url, "sending models request to upstream");
         let mut req = self.client.get(&url);
         if let Some(auth) = self.auth_header() {
             req = req.header("Authorization", auth);
         }
         let res = req.send().await.map_err(ProviderError::Request)?;
         let status = res.status();
+        tracing::info!(url = %url, status = %status, "upstream models responded");
         if !status.is_success() {
             let body = res.text().await.unwrap_or_default();
             return Err(ProviderError::Status(status, body));

@@ -49,9 +49,10 @@ async fn chat_completions_forwards_to_backend_and_records() {
     let backend = BackendConfig {
         id: "test".to_string(),
         name: "Test".to_string(),
-        base_url: mock.uri(),
+        base_url: format!("{}/v1", mock.uri()),
         api_key: None,
         backend_type: BackendType::Ollama,
+        model: None,
     };
     let config = Config {
         backends: vec![backend],
@@ -101,9 +102,10 @@ async fn get_models_forwards_to_backend() {
     let backend = BackendConfig {
         id: "test".to_string(),
         name: "Test".to_string(),
-        base_url: mock.uri(),
+        base_url: format!("{}/v1", mock.uri()),
         api_key: None,
         backend_type: BackendType::Ollama,
+        model: None,
     };
     let config = Config {
         backends: vec![backend],

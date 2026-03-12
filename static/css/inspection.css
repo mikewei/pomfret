@@ -369,7 +369,7 @@
   opacity: 1;
 }
 
-/* Value wrap: Copy button fixed at right of value block, same line as first row */
+/* Value wrap: Copy button inline, right after value text */
 .insp-tree-line {
   display: flex;
   align-items: flex-start;
@@ -383,8 +383,6 @@
   position: relative;
   flex: 1;
   min-width: 0;
-  display: block;
-  padding-right: 3.5rem; /* leave space for Copy button */
 }
 
 .insp-tree-value-wrap .insp-tree-string,
@@ -393,11 +391,12 @@
 }
 
 .insp-tree-value-wrap .insp-tree-copy {
-  position: absolute;
-  right: 0;
-  top: 0;
+  display: inline-flex;
+  align-items: center;
+  vertical-align: middle;
+  margin-left: 0.35rem;
   opacity: 0;
-  padding: 2px 6px;
+  padding: 1px 5px;
   font-size: 0.7rem;
   line-height: 1.2;
   color: var(--text-muted);
@@ -406,16 +405,24 @@
   border-radius: 3px;
   cursor: pointer;
   transition: opacity 0.12s;
+  white-space: nowrap;
 }
 
 .insp-tree-value-wrap:hover .insp-tree-copy,
-.insp-tree-value-wrap .insp-tree-copy:focus {
+.insp-tree-value-wrap .insp-tree-copy:focus-visible {
   opacity: 1;
 }
 
 .insp-tree-value-wrap .insp-tree-copy:hover {
   color: var(--text);
   background: var(--bg-hover, #3d3d3d);
+}
+
+/* Subtle highlight on JSON value hover */
+.insp-tree-value-wrap:hover .insp-tree-string,
+.insp-tree-value-wrap:hover .insp-tree-prim {
+  background: rgba(88, 166, 255, 0.08);
+  border-radius: 2px;
 }
 
 .insp-raw-pre {

@@ -170,15 +170,8 @@ pub async fn handle_chat_completions(
                 .into_response();
         }
     };
-    let req_body_str = String::from_utf8_lossy(&body).to_string();
     let request_query = parts.uri.query().map(|s| s.to_string());
     let request_headers = request_headers_json(&parts.headers);
-    let stream = serde_json::from_str::<ChatRequestMin>(&req_body_str)
-        .map(|r| r.stream)
-        .unwrap_or(false);
-    let model = serde_json::from_str::<ChatRequestMin>(&req_body_str)
-        .ok()
-        .and_then(|r| r.model);
 
     let backend = match state.app_state.current_backend().await {
         Some(b) => b,
@@ -193,7 +186,35 @@ pub async fn handle_chat_completions(
         }
     };
 
+    let body = if let Some(ref override_model) = backend.model {
+        match serde_json::from_slice::<serde_json::Value>(&body) {
+            Ok(mut v) => {
+                v["model"] = serde_json::Value::String(override_model.clone());
+                bytes::Bytes::from(serde_json::to_vec(&v).unwrap_or_else(|_| body.to_vec()))
+            }
+            Err(_) => body,
+        }
+    } else {
+        body
+    };
+
+    let req_body_str = String::from_utf8_lossy(&body).to_string();
+    let stream = serde_json::from_str::<ChatRequestMin>(&req_body_str)
+        .map(|r| r.stream)
+        .unwrap_or(false);
+    let model = serde_json::from_str::<ChatRequestMin>(&req_body_str)
+        .ok()
+        .and_then(|r| r.model);
+
+    tracing::info!(
+        model = model.as_deref().unwrap_or("-"),
+        stream = stream,
+        backend = %backend.name,
+        "received POST /v1/chat/completions"
+    );
+
     let backend_id = backend.id.clone();
+    let backend_name = backend.name.clone();
     let provider = match create_provider(backend) {
         Ok(p) => p,
         Err(_) => {
@@ -211,7 +232,7 @@ pub async fn handle_chat_completions(
         "/v1/chat/completions".to_string(),
         request_query,
         request_headers,
-        Some(backend_id.clone()),
+        Some(backend_id),
         model.clone(),
         Some(req_body_str),
     );
@@ -219,8 +240,11 @@ pub async fn handle_chat_completions(
     state.store.push(record).await;
     let _ = state.notify_tx.send(NotifyEvent::Requests);
 
+    tracing::info!(backend = %backend_name, "forwarding chat completions to backend");
+
     match provider.chat_completions(body, stream).await {
         Ok(ProviderResponse::Body(resp_bytes)) => {
+            tracing::info!(backend = %backend_name, status = 200, stream = false, "backend responded");
             let status = StatusCode::OK;
             let resp_str = String::from_utf8_lossy(&resp_bytes).to_string();
             let resp_hdrs = response_headers_json("application/json");
@@ -237,6 +261,7 @@ pub async fn handle_chat_completions(
                 .into_response()
         }
         Ok(ProviderResponse::Stream(s)) => {
+            tracing::info!(backend = %backend_name, status = 200, stream = true, "backend responded with stream");
             let store = state.store.clone();
             let notify_tx = state.notify_tx.clone();
             let resp_hdrs = response_headers_json("text/event-stream");
@@ -288,6 +313,7 @@ pub async fn handle_chat_completions(
                 ProviderError::Status(status, body) => (*status, body.clone()),
                 _ => (StatusCode::BAD_GATEWAY, e.to_string()),
             };
+            tracing::info!(backend = %backend_name, status = %code, "backend error");
             let resp_hdrs = response_headers_json("application/json");
             state
                 .store
@@ -333,7 +359,10 @@ pub async fn handle_models(
                 .into_response();
         }
     };
+    tracing::info!(backend = %backend.name, "received GET /v1/models");
+
     let backend_id = backend.id.clone();
+    let backend_name = backend.name.clone();
     let provider = match create_provider(backend) {
         Ok(p) => p,
         Err(_) => {
@@ -359,9 +388,12 @@ pub async fn handle_models(
     state.store.push(record).await;
     let _ = state.notify_tx.send(NotifyEvent::Requests);
 
+    tracing::info!(backend = %backend_name, "forwarding models request to backend");
+
     let resp_hdrs_ok = response_headers_json("application/json");
     match provider.get_models().await {
         Ok(bytes) => {
+            tracing::info!(backend = %backend_name, status = 200, "backend models responded");
             let resp_str = String::from_utf8_lossy(&bytes).to_string();
             state
                 .store
@@ -380,6 +412,7 @@ pub async fn handle_models(
                 ProviderError::Status(status, body) => (*status, body.clone()),
                 _ => (StatusCode::BAD_GATEWAY, e.to_string()),
             };
+            tracing::info!(backend = %backend_name, status = %code, "backend models error");
             state
                 .store
                 .update_response(&record_id, Some(msg.clone()), Some(code.as_u16()), Some(resp_hdrs_ok))
