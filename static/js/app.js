@@ -27,7 +27,6 @@
   const clientTotalEl = document.getElementById('client-total');
   const backendStatusEl = document.getElementById('backend-status');
   const refreshStatusBtn = document.getElementById('refresh-status');
-  const refreshAllBtn = document.getElementById('refresh-all');
   const tabButtons = document.querySelectorAll('.tab[data-tab]');
   const tabPanels = document.querySelectorAll('.tab-panel');
   const btnExportConfig = document.getElementById('btn-export-config');
@@ -410,10 +409,6 @@
     });
   };
 
-  refreshAllBtn.onclick = function () {
-    loadBackendsAndStatus(true);
-    loadRequests();
-  };
 
   function showConfigMessage(msg, isError) {
     alert(msg);
