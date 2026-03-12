@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Pomfret Console</title>
+  <link rel="icon" type="image/png" href="/static/pomfret.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/css/main.css" />
+  <link rel="stylesheet" href="/static/css/inspection.css" />
+</head>
+<body>
+  <div class="app">
+    <header class="header">
+      <div class="header-inner">
+        <div class="header-left">
+          <div class="logo-row">
+            <img src="/static/pomfret.png" alt="Pomfret" class="logo-img" />
+            <h1 class="logo" data-i18n="logo">Pomfret</h1>
+          </div>
+          <p class="tagline" data-i18n="tagline">Proxy Of Models For Routing, Evaluation &amp; Telemetry</p>
+        </div>
+        <span class="lang-switch" role="group" aria-label="Language">
+          <button type="button" class="lang-btn" id="lang-zh" data-lang="zh-CN" title="简体中文">中</button>
+          <button type="button" class="lang-btn" id="lang-en" data-lang="en" title="English">En</button>
+        </span>
+      </div>
+    </header>
+    <div id="connection-banner" class="connection-banner" role="alert" aria-live="polite" hidden>
+      <span class="connection-banner-dot" aria-hidden="true"></span>
+      <span class="connection-banner-text" id="connection-banner-text"></span>
+      <button type="button" class="connection-banner-retry" id="connection-banner-retry"></button>
+    </div>
+    <main class="main">
+      <nav class="tabs" role="tablist" aria-label="Main sections">
+        <button type="button" class="tab active" data-tab="configuration" role="tab" aria-selected="true" data-i18n="tabConfiguration">Configuration</button>
+        <button type="button" class="tab" data-tab="dashboard" role="tab" aria-selected="false" data-i18n="tabDashboard">Dashboard</button>
+        <button type="button" class="tab" data-tab="inspection" role="tab" aria-selected="false" data-i18n="tabInspection">Inspection</button>
+      </nav>
+
+      <div id="panel-configuration" class="tab-panel active" role="tabpanel">
+        <section id="section-connect" class="card">
+          <h2 class="card-title" data-i18n="connectTitle">How to connect (client)</h2>
+          <p class="card-desc" data-i18n="connectDesc">Point your client (e.g. OpenClaw, Agent UI, SDK) to the base URL below.</p>
+          <div class="connect-box">
+            <label data-i18n="gatewayUrl">Base URL</label>
+            <div class="input-row">
+              <input type="text" id="gateway-url" readonly />
+              <button type="button" class="btn btn-small btn-secondary" id="copy-url" data-i18n="copy">Copy</button>
+            </div>
+          </div>
+          <div class="code-block-wrap">
+            <label data-i18n="exampleChat">Example: Chat completion</label>
+            <div class="code-block-row">
+              <pre class="code-block" id="curl-chat"><code></code></pre>
+              <button type="button" class="btn btn-small btn-secondary copy-code" data-target="curl-chat" data-i18n="copy">Copy</button>
+            </div>
+          </div>
+          <div class="code-block-wrap">
+            <label data-i18n="exampleModels">Example: List models</label>
+            <div class="code-block-row">
+              <pre class="code-block" id="curl-models"><code></code></pre>
+              <button type="button" class="btn btn-small btn-secondary copy-code" data-target="curl-models" data-i18n="copy">Copy</button>
+            </div>
+          </div>
+          <div class="connect-actions">
+            <button type="button" class="btn btn-secondary btn-small" id="btn-openclaw-config" data-i18n="openclawConfig">OpenClaw Config</button>
+          </div>
+        </section>
+
+        <section id="section-backends" class="card">
+          <div class="card-title-row">
+            <h2 class="card-title" data-i18n="backendsTitle">Backend LLM configuration</h2>
+            <button type="button" class="btn btn-secondary" id="btn-export-config" data-i18n="export">Export</button>
+          </div>
+          <p class="card-desc" data-i18n="backendsDesc">Configure and select the backend to forward to; edit Base URL and API Key.</p>
+          <div id="backends-list"></div>
+        </section>
+      </div>
+
+      <div id="panel-dashboard" class="tab-panel" role="tabpanel" hidden>
+        <section class="card">
+          <h2 class="card-title" data-i18n="tabDashboard">Dashboard</h2>
+          <p class="card-desc" data-i18n="dashboardDesc">Connection status and backend usage overview.</p>
+          <div class="stat-row">
+            <span class="stat-label" data-i18n="totalRequests">Total requests</span>
+            <span class="stat-value" id="client-total">0</span>
+          </div>
+          <h3 class="sub-title" data-i18n="backendConnectivity">Backend connectivity &amp; usage</h3>
+          <button type="button" class="btn btn-secondary btn-small" id="refresh-status" data-i18n="refreshStatus">Refresh status</button>
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr><th data-i18n="name">Name</th><th data-i18n="current">Current</th><th data-i18n="reachable">Reachable</th><th data-i18n="requests">Requests</th><th data-i18n="lastRequest">Last request</th></tr>
+              </thead>
+              <tbody id="backend-status"></tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+
+      <div id="panel-inspection" class="tab-panel" role="tabpanel" hidden>
+        <section class="card insp-card">
+          <h2 class="card-title" data-i18n="clientRequests">Client requests</h2>
+          <p class="card-desc" data-i18n="inspectionDesc">Request history and detailed analysis.</p>
+          <div class="insp-layout">
+            <div class="insp-list-wrap">
+              <div class="insp-list-title" data-i18n="inspTraceList">Trace list</div>
+              <div class="insp-table-wrap">
+                <table class="insp-table">
+                  <thead>
+                    <tr>
+                      <th data-i18n="time">Time</th>
+                      <th data-i18n="method">Method</th>
+                      <th data-i18n="path">Path</th>
+                      <th data-i18n="backend">Backend</th>
+                      <th data-i18n="model">Model</th>
+                      <th data-i18n="status">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody id="insp-trace-tbody"></tbody>
+                </table>
+              </div>
+            </div>
+            <div class="insp-detail-wrap" id="insp-detail-panel" hidden>
+              <div id="insp-detail-summary" class="insp-summary-strip"></div>
+              <div class="insp-detail-tabs" id="insp-detail-tabs">
+                <button type="button" class="insp-tab active" data-panel="request" data-i18n="requestBody">Request</button>
+                <button type="button" class="insp-tab" data-panel="response" data-i18n="responseBody">Response</button>
+              </div>
+              <div class="insp-detail-body">
+                <div class="insp-detail-panel" id="insp-detail-request-wrap">
+                  <div id="insp-detail-request"></div>
+                </div>
+                <div class="insp-detail-panel insp-panel-hidden" id="insp-detail-response-wrap">
+                  <div id="insp-detail-response"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+
+    </main>
+    <footer class="footer">
+      <div class="footer-left">
+        <span data-i18n="logo">Pomfret</span>
+        <span class="version-info" id="version-info"></span>
+      </div>
+      <button type="button" class="btn btn-ghost btn-small" id="refresh-all" data-i18n="refreshAll">Refresh all</button>
+    </footer>
+  </div>
+  <div id="openclaw-modal" class="modal-overlay" hidden role="dialog" aria-labelledby="openclaw-modal-title" aria-modal="true">
+    <div class="modal openclaw-modal-inner" onclick="event.stopPropagation()">
+      <h3 id="openclaw-modal-title" class="modal-title" data-i18n="openclawConfig">OpenClaw Config</h3>
+      <p class="modal-desc" data-i18n="openclawConfigExampleDesc">OpenClaw config example (in models.providers of openclaw.conf)</p>
+      <pre class="code-block modal-code-block" id="openclaw-config-content"><code></code></pre>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-secondary" id="openclaw-config-copy" data-i18n="copy">Copy</button>
+        <button type="button" class="btn btn-ghost" id="openclaw-modal-close" data-i18n="close">Close</button>
+      </div>
+    </div>
+  </div>
+  <script src="/static/js/i18n.js"></script>
+  <script src="/static/js/inspection.js"></script>
+  <script src="/static/js/app.js"></script>
+</body>
+</html>

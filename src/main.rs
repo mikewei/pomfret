@@ -1,0 +1,67 @@
+//! Pomfret binary: Proxy Of Models For Routing, Evaluation & Telemetry — OpenAI-compatible proxy + web console.
+
+use clap::Parser;
+use pomfret::config::{default_backends_config_path, resolve_config, AppState};
+use pomfret::store::MemoryStore;
+use pomfret::web::{router, NotifyEvent, WebState};
+use std::net::SocketAddr;
+use tokio::sync::broadcast;
+use tracing_subscriber::EnvFilter;
+
+#[derive(Parser)]
+#[command(name = "pomfret")]
+#[command(about = "Proxy Of Models For Routing, Evaluation & Telemetry")]
+struct Cli {
+    /// Backends config file path (default: ~/.pomfret/backends.conf)
+    #[arg(long, short = 'c')]
+    config: Option<std::path::PathBuf>,
+
+    /// Port to listen on (default: 8080)
+    #[arg(long, short = 'p')]
+    port: Option<u16>,
+
+    /// Bind address (default: 127.0.0.1)
+    #[arg(long, short = 'b')]
+    bind: Option<String>,
+}
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    tracing_subscriber::fmt()
+        .with_env_filter(EnvFilter::from_default_env().add_directive("pomfret=info".parse()?))
+        .init();
+
+    let cli = Cli::parse();
+    let resolved = resolve_config(
+        cli.config.as_deref(),
+        cli.port,
+        cli.bind,
+    )?;
+
+    let backends_path = cli
+        .config
+        .clone()
+        .unwrap_or_else(default_backends_config_path);
+    let app_state = AppState::new(resolved.config);
+    let store = MemoryStore::new(500);
+    let (notify_tx, _) = broadcast::channel::<NotifyEvent>(32);
+    let web_state = WebState {
+        app_state,
+        store: store.clone(),
+        backends_path,
+        notify_tx,
+    };
+
+    let app = router(web_state);
+    let addr: SocketAddr = format!("{}:{}", resolved.bind, resolved.port)
+        .parse()
+        .expect("valid bind and port");
+    tracing::info!("listening on {}", addr);
+    tracing::info!("Open web console at http://localhost:{}", resolved.port);
+    axum::serve(
+        tokio::net::TcpListener::bind(addr).await?,
+        app.into_make_service(),
+    )
+    .await?;
+    Ok(())
+}

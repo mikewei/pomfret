@@ -1,0 +1,433 @@
+/* Inspection panel: Wireshark-style list + detail */
+
+#panel-inspection {
+  display: flex;
+  flex-direction: column;
+  min-height: 360px;
+}
+
+.insp-layout {
+  display: flex;
+  flex-direction: column;
+  min-height: 360px;
+  gap: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-card);
+  overflow: visible;
+}
+
+.insp-list-wrap {
+  flex: 0 0 auto;
+  max-height: 42vh;
+  min-height: 120px;
+  display: flex;
+  flex-direction: column;
+  border-bottom: 1px solid var(--border);
+}
+
+.insp-list-title {
+  flex: 0 0 auto;
+  padding: 0.4rem 0.75rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  background: var(--bg-input);
+  border-bottom: 1px solid var(--border);
+}
+
+.insp-table-wrap {
+  overflow: auto;
+  flex: 1;
+  min-height: 0;
+}
+
+.insp-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8rem;
+}
+
+.insp-table th,
+.insp-table td {
+  padding: 0.35rem 0.6rem;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+.insp-table th {
+  position: sticky;
+  top: 0;
+  background: var(--bg-input);
+  color: var(--text-muted);
+  font-weight: 500;
+  z-index: 1;
+}
+
+.insp-table .insp-cell-time { width: 10em; }
+.insp-table .insp-cell-method { width: 4em; }
+.insp-table .insp-cell-path { max-width: 12em; overflow: hidden; text-overflow: ellipsis; }
+.insp-table .insp-cell-backend { max-width: 8em; overflow: hidden; text-overflow: ellipsis; }
+.insp-table .insp-cell-model { max-width: 10em; overflow: hidden; text-overflow: ellipsis; }
+.insp-table .insp-cell-status { width: 3.5em; }
+
+.insp-trace-row {
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+.insp-trace-row:hover {
+  background: var(--bg-card-hover);
+}
+
+.insp-trace-row.insp-row-selected {
+  background: rgba(88, 166, 255, 0.12);
+}
+
+.insp-trace-row.insp-row-selected:hover {
+  background: rgba(88, 166, 255, 0.18);
+}
+
+.insp-trace-row .status-ok { color: var(--success); }
+.insp-trace-row .status-fail { color: var(--danger); }
+
+/* Detail panel: grows with content so footer moves to end of page */
+.insp-detail-wrap {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.insp-detail-wrap[hidden] {
+  display: none !important;
+}
+
+/* Meta: Overview (full-width strip) + two columns (Request | Response) */
+.insp-meta-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  font-size: 0.8rem;
+  background: var(--bg-input);
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+}
+
+.insp-overview-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem 1.5rem;
+  width: 100%;
+  padding: 0.5rem 0;
+}
+
+.insp-overview-item {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.25rem;
+}
+
+.insp-overview-label {
+  color: var(--text-muted);
+}
+
+.insp-overview-value {
+  font-family: var(--font-mono);
+  color: var(--text);
+}
+
+.insp-meta-columns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem 1.5rem;
+}
+
+@media (max-width: 560px) {
+  .insp-meta-columns {
+    grid-template-columns: 1fr;
+  }
+}
+
+.insp-meta-col {
+  min-width: 0;
+}
+
+.insp-meta-section {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+  overflow: hidden;
+}
+
+.insp-meta-title {
+  padding: 0.4rem 0.65rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  background: var(--bg-input);
+  border-bottom: 1px solid var(--border);
+}
+
+.insp-meta-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.78rem;
+}
+
+.insp-meta-table td {
+  padding: 0.35rem 0.65rem;
+  vertical-align: top;
+  border-bottom: 1px solid var(--border);
+}
+
+.insp-meta-table tr:last-child td {
+  border-bottom: none;
+}
+
+.insp-meta-name {
+  color: var(--text-muted);
+  white-space: nowrap;
+  width: 1%;
+  max-width: 10em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.insp-meta-value {
+  font-family: var(--font-mono);
+  color: var(--text);
+  word-break: break-all;
+}
+
+.insp-summary-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.25rem;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.8rem;
+  background: var(--bg-input);
+  border-bottom: 1px solid var(--border);
+}
+
+.insp-summary-label {
+  color: var(--text-muted);
+  margin-right: 0.25rem;
+}
+
+.insp-summary-value {
+  font-family: var(--font-mono);
+  color: var(--text);
+}
+
+.insp-detail-tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--border);
+  padding: 0 0.5rem 0 0;
+  background: var(--bg-input);
+  flex-shrink: 0;
+}
+
+.insp-tab {
+  padding: 0.4rem 0.9rem;
+  font-size: 0.8rem;
+  font-weight: 500;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.insp-tab:hover {
+  color: var(--text);
+}
+
+.insp-tab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+.insp-detail-body {
+  padding: 0.6rem 0.75rem;
+  font-size: 0.8rem;
+  font-family: var(--font-mono);
+}
+
+.insp-detail-panel.insp-panel-hidden {
+  display: none !important;
+}
+
+.insp-loading,
+.insp-error {
+  color: var(--text-muted);
+  margin: 0.5rem 0;
+}
+
+/* JSON tree */
+.insp-tree-node {
+  --depth: 0;
+}
+
+.insp-tree-line,
+.insp-tree-toggle {
+  line-height: 1.45;
+  word-break: break-word;
+  white-space: pre-wrap;
+}
+
+.insp-tree-key {
+  color: #7ee787;
+}
+
+.insp-tree-string {
+  color: #a5d6ff;
+}
+
+.insp-tree-prim {
+  color: #ffa657;
+}
+
+.insp-tree-null {
+  color: var(--text-dim);
+}
+
+.insp-tree-bracket {
+  color: var(--text-muted);
+}
+
+.insp-tree-count {
+  color: var(--text-dim);
+  font-size: 0.9em;
+}
+
+.insp-tree-toggle {
+  cursor: pointer;
+  user-select: none;
+}
+
+.insp-tree-toggle::before {
+  content: '▾';
+  display: inline-block;
+  width: 1em;
+  margin-right: 0.15em;
+  color: var(--text-dim);
+  transition: transform 0.15s;
+}
+
+.insp-tree-toggle.insp-tree-toggled-closed::before {
+  transform: rotate(-90deg);
+}
+
+.insp-tree-children {
+  border-left: 1px solid var(--border);
+  margin-left: 0.5em;
+  padding-left: 0.35em;
+}
+
+.insp-tree-children.insp-tree-closed {
+  display: none;
+}
+
+/* Key path tooltip on hover */
+.insp-tree-key-wrap {
+  cursor: default;
+  border-radius: 2px;
+}
+
+.insp-tree-path-tooltip {
+  position: fixed;
+  z-index: 100;
+  padding: 4px 8px;
+  font-size: 0.75rem;
+  font-family: var(--font-mono, monospace);
+  color: var(--text);
+  background: var(--bg-elevated, #2d2d2d);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  white-space: nowrap;
+  max-width: 80vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.12s;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+}
+
+.insp-tree-path-tooltip.insp-tree-path-tooltip-visible {
+  opacity: 1;
+}
+
+/* Value wrap: Copy button fixed at right of value block, same line as first row */
+.insp-tree-line {
+  display: flex;
+  align-items: flex-start;
+}
+
+.insp-tree-line .insp-tree-key-wrap {
+  flex-shrink: 0;
+}
+
+.insp-tree-value-wrap {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  display: block;
+  padding-right: 3.5rem; /* leave space for Copy button */
+}
+
+.insp-tree-value-wrap .insp-tree-string,
+.insp-tree-value-wrap .insp-tree-prim {
+  display: inline;
+}
+
+.insp-tree-value-wrap .insp-tree-copy {
+  position: absolute;
+  right: 0;
+  top: 0;
+  opacity: 0;
+  padding: 2px 6px;
+  font-size: 0.7rem;
+  line-height: 1.2;
+  color: var(--text-muted);
+  background: var(--bg-elevated, #2d2d2d);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  cursor: pointer;
+  transition: opacity 0.12s;
+}
+
+.insp-tree-value-wrap:hover .insp-tree-copy,
+.insp-tree-value-wrap .insp-tree-copy:focus {
+  opacity: 1;
+}
+
+.insp-tree-value-wrap .insp-tree-copy:hover {
+  color: var(--text);
+  background: var(--bg-hover, #3d3d3d);
+}
+
+.insp-raw-pre {
+  margin: 0;
+  padding: 0.5rem 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  color: var(--text);
+}
+
+.insp-raw-pre .insp-raw {
+  white-space: pre-wrap;
+}
