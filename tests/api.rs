@@ -65,7 +65,9 @@ async fn api_requests_list_and_get() {
         None,
         None,
         Some("ollama".to_string()),
+        None,
         Some("llama2".to_string()),
+        None,
         Some(r#"{"messages":[]}"#.to_string()),
     );
     let id = record.id.clone();

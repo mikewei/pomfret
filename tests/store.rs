@@ -11,7 +11,9 @@ async fn push_and_get() {
         None,
         None,
         Some("ollama".to_string()),
+        None,
         Some("llama2".to_string()),
+        None,
         Some(r#"{"messages":[]}"#.to_string()),
     );
     let id = r.id.clone();
@@ -35,6 +37,8 @@ async fn update_response() {
         None,
         None,
         None,
+        None,
+        None,
     );
     let id = r.id.clone();
     store.push(r).await;
@@ -53,6 +57,8 @@ async fn list_recent_and_eviction() {
         let r = pomfret::store::RequestRecord::new(
             "POST".to_string(),
             "/v1/chat/completions".to_string(),
+            None,
+            None,
             None,
             None,
             None,
