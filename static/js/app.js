@@ -26,7 +26,6 @@
   const backendsListEl = document.getElementById('backends-list');
   const clientTotalEl = document.getElementById('client-total');
   const backendStatusEl = document.getElementById('backend-status');
-  const refreshStatusBtn = document.getElementById('refresh-status');
   const tabButtons = document.querySelectorAll('.tab[data-tab]');
   const tabPanels = document.querySelectorAll('.tab-panel');
   const btnExportConfig = document.getElementById('btn-export-config');
@@ -283,27 +282,196 @@
     if (editNew) editNew.hidden = !addNewVisible;
   }
 
-  function renderClientRequests(requests) {
-    fetch('/api/stats').then(function (r) { return r.json(); }).then(function (s) {
-      clientTotalEl.textContent = s.total_requests != null ? s.total_requests : (requests ? requests.length : 0);
+  var statTotalTokensEl = document.getElementById('stat-total-tokens');
+  var statPromptTokensEl = document.getElementById('stat-prompt-tokens');
+  var statCompletionTokensEl = document.getElementById('stat-completion-tokens');
+
+  function formatNumber(n) {
+    if (n == null) return '0';
+    return Number(n).toLocaleString();
+  }
+
+  // --- Time range selector ---
+  var _selectedRange = '5h'; // '5h' | 'all'
+  var timeRangeBtns = document.querySelectorAll('.time-range-btn[data-range]');
+  timeRangeBtns.forEach(function (btn) {
+    btn.onclick = function () {
+      var range = btn.getAttribute('data-range');
+      if (range === _selectedRange) return;
+      _selectedRange = range;
+      timeRangeBtns.forEach(function (b) {
+        b.classList.toggle('active', b.getAttribute('data-range') === range);
+      });
+      loadDashboardStats();
+    };
+  });
+
+  function getSinceParam() {
+    if (_selectedRange === '5h') {
+      return Math.floor(Date.now() / 1000) - 5 * 3600;
+    }
+    return null;
+  }
+
+  function loadDashboardStats() {
+    var since = getSinceParam();
+    var url = '/api/stats';
+    if (since != null) url += '?since=' + since;
+    fetch(url).then(function (r) { return r.json(); }).then(function (s) {
+      clientTotalEl.textContent = formatNumber(s.total_requests);
+      if (statTotalTokensEl) statTotalTokensEl.textContent = formatNumber(s.total_tokens);
+      if (statPromptTokensEl) statPromptTokensEl.textContent = formatNumber(s.total_prompt_tokens);
+      if (statCompletionTokensEl) statCompletionTokensEl.textContent = formatNumber(s.total_completion_tokens);
     }).catch(function () {
-      clientTotalEl.textContent = requests ? requests.length : 0;
+      clientTotalEl.textContent = '-';
     });
+  }
+
+  function renderClientRequests(requests) {
+    loadDashboardStats();
     if (window.Inspection) {
       window.Inspection.renderList(requests || []);
     }
   }
 
+  // --- Timeseries chart ---
+  var _tsChart = null;
+  var _tsChartCanvas = document.getElementById('timeseries-chart');
+
+  function initChart() {
+    if (!_tsChartCanvas || typeof Chart === 'undefined') return;
+    var ctx = _tsChartCanvas.getContext('2d');
+    var gridColor = 'rgba(48, 54, 61, 0.6)';
+    var tickColor = '#8b949e';
+    _tsChart = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: [],
+        datasets: [
+          {
+            label: t('chartRequests'),
+            data: [],
+            borderColor: '#58a6ff',
+            backgroundColor: 'rgba(88, 166, 255, 0.08)',
+            borderWidth: 1.5,
+            pointRadius: 0,
+            pointHitRadius: 6,
+            fill: true,
+            tension: 0.3,
+            yAxisID: 'y'
+          },
+          {
+            label: t('chartTokens'),
+            data: [],
+            borderColor: '#3fb950',
+            backgroundColor: 'rgba(63, 185, 80, 0.06)',
+            borderWidth: 1.5,
+            pointRadius: 0,
+            pointHitRadius: 6,
+            fill: true,
+            tension: 0.3,
+            yAxisID: 'y1'
+          }
+        ]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          legend: {
+            labels: {
+              color: tickColor,
+              font: { family: "'DM Sans', sans-serif", size: 12 },
+              boxWidth: 12,
+              padding: 16,
+              generateLabels: function (chart) {
+                return chart.data.datasets.map(function (ds, i) {
+                  var meta = chart.getDatasetMeta(i);
+                  var isHidden = meta.hidden === true;
+                  return {
+                    text: ds.label,
+                    fillStyle: isHidden ? 'rgba(128,128,128,0.3)' : ds.backgroundColor,
+                    strokeStyle: isHidden ? 'rgba(128,128,128,0.5)' : ds.borderColor,
+                    lineWidth: ds.borderWidth || 1.5,
+                    hidden: false,
+                    fontColor: isHidden ? '#6e7681' : tickColor,
+                    datasetIndex: i
+                  };
+                });
+              }
+            }
+          },
+          tooltip: {
+            backgroundColor: 'rgba(22, 27, 34, 0.95)',
+            titleColor: '#e6edf3',
+            bodyColor: '#e6edf3',
+            borderColor: '#30363d',
+            borderWidth: 1,
+            padding: 10,
+            callbacks: {
+              label: function (ctx) {
+                return ctx.dataset.label + ': ' + formatNumber(ctx.parsed.y);
+              }
+            }
+          }
+        },
+        scales: {
+          x: {
+            ticks: { color: tickColor, font: { size: 10 }, maxTicksLimit: 12, maxRotation: 0 },
+            grid: { color: gridColor }
+          },
+          y: {
+            type: 'linear',
+            position: 'left',
+            min: 0,
+            title: { display: true, text: t('chartRequests'), color: tickColor, font: { size: 11 } },
+            ticks: { color: tickColor, font: { size: 10 } },
+            grid: { color: gridColor }
+          },
+          y1: {
+            type: 'linear',
+            position: 'right',
+            min: 0,
+            title: { display: true, text: t('chartTokens'), color: tickColor, font: { size: 11 } },
+            ticks: { color: tickColor, font: { size: 10 } },
+            grid: { drawOnChartArea: false }
+          }
+        }
+      }
+    });
+  }
+
+  function loadTimeseries() {
+    fetch('/api/stats/timeseries?hours=24&bucket=60')
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (!_tsChart || !data || !data.length) return;
+        var labels = data.map(function (b) {
+          var d = new Date(b.ts * 1000);
+          return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+        });
+        var requests = data.map(function (b) { return b.requests; });
+        var tokens = data.map(function (b) { return b.total_tokens; });
+        _tsChart.data.labels = labels;
+        _tsChart.data.datasets[0].data = requests;
+        _tsChart.data.datasets[1].data = tokens;
+        _tsChart.update('none');
+      })
+      .catch(function () {});
+  }
+
   function renderBackendStatus(statusList) {
     if (!statusList || statusList.length === 0) {
-      backendStatusEl.innerHTML = '<tr><td colspan="4">' + escapeHtml(t('noBackendsRow')) + '</td></tr>';
+      backendStatusEl.innerHTML = '<tr><td colspan="5">' + escapeHtml(t('noBackendsRow')) + '</td></tr>';
       return;
     }
     var rows = statusList.map(function (s) {
       var reachBadge = s.reachable ? '<span class="badge live">' + escapeHtml(t('reachableBadge')) + '</span>' : '<span class="badge down">' + escapeHtml(t('unreachableBadge')) + '</span>';
       var lastAt = s.last_request_at ? new Date(s.last_request_at * 1000).toLocaleString() : '-';
       var err = s.last_error ? (' title="' + escapeHtml(s.last_error) + '"') : '';
-      return '<tr><td>' + escapeHtml(s.name) + '</td><td' + err + '>' + reachBadge + '</td><td>' + s.request_count + '</td><td>' + lastAt + '</td></tr>';
+      var tokenStr = formatNumber(s.total_tokens);
+      return '<tr><td>' + escapeHtml(s.name) + '</td><td' + err + '>' + reachBadge + '</td><td>' + formatNumber(s.request_count) + '</td><td>' + tokenStr + '</td><td>' + lastAt + '</td></tr>';
     }).join('');
     backendStatusEl.innerHTML = rows;
   }
@@ -329,12 +497,53 @@
     return false;
   }
 
+  function isUserEditingRouting() {
+    if (!routingRulesListEl) return false;
+    if (routingRulesListEl.querySelector('.routing-rule-row.expanded')) return true;
+    return false;
+  }
+
+  function refreshRoutingTargetSelects() {
+    if (!routingRulesListEl) return;
+    routingRulesListEl.querySelectorAll('.routing-target-select').forEach(function (sel) {
+      var curVal = sel.value;
+      var opts = '';
+      opts += '<option value="first_available">' + escapeHtml(t('routingTargetFirst')) + '</option>';
+      opts += '<option value="round_robin">' + escapeHtml(t('routingTargetRoundRobin')) + '</option>';
+      _cachedBackends.forEach(function (b) {
+        opts += '<option value="specific:' + escapeHtml(b.id) + '">' + escapeHtml(b.name) + '</option>';
+      });
+      sel.innerHTML = opts;
+      var hasVal = Array.prototype.some.call(sel.options, function (o) { return o.value === curVal; });
+      if (hasVal) sel.value = curVal;
+    });
+
+    routingRulesListEl.querySelectorAll('.routing-target-label').forEach(function (span) {
+      var row = span.closest('.routing-rule-row');
+      if (!row) return;
+      var idx = row.querySelector('.routing-rule-head') && row.querySelector('.routing-rule-head').getAttribute('data-index');
+      if (idx === 'default') {
+        span.textContent = targetLabel(_routingConfig.default_target, _routingConfig.default_backend_id);
+      } else {
+        var i = parseInt(idx, 10);
+        var rule = _routingConfig.rules && _routingConfig.rules[i];
+        if (rule) span.textContent = targetLabel(rule.target, rule.target_backend_id);
+      }
+    });
+  }
+
   function loadBackendsAndStatus(force) {
     if (!force && isUserEditingBackends()) return;
     fetch('/api/backends').then(function (r) { return r.json(); }).then(function (list) {
       if (!force && isUserEditingBackends()) return;
       _cachedBackends = list || [];
+      if (window.Inspection) window.Inspection.setBackends(list);
       renderBackendsList(list);
+      if (isUserEditingRouting()) {
+        refreshRoutingTargetSelects();
+      } else {
+        renderRoutingRules();
+      }
     }).catch(function () {
       showConnectionLost();
       backendsListEl.innerHTML = '<p class="card-desc">' + escapeHtml(t('loadFailed')) + '</p>';
@@ -381,14 +590,6 @@
     if (window.Inspection) window.Inspection.showDetail(id);
   }
 
-  refreshStatusBtn.onclick = function () {
-    refreshStatusBtn.disabled = true;
-    fetch('/api/backends/status').then(function (r) { return r.json(); }).then(function (list) {
-      renderBackendStatus(list);
-    }).finally(function () {
-      refreshStatusBtn.disabled = false;
-    });
-  };
 
 
   function showConfigMessage(msg, isError) {
@@ -656,7 +857,7 @@
       body: JSON.stringify(body)
     }).then(function (r) { return r.json(); }).then(function (res) {
       if (res.ok) {
-        showToast(t('routingSaved'));
+        showToast(t('backendSaved'));
       } else {
         showToast(t('routingSaveFailed'));
       }
@@ -683,11 +884,13 @@
     };
   }
 
-  // Cache backends for target select
-  function updateCachedBackends() {
+  function fetchCachedBackendsThen(callback) {
     fetch('/api/backends').then(function (r) { return r.json(); }).then(function (list) {
       _cachedBackends = list || [];
-    }).catch(function () {});
+      if (window.Inspection) window.Inspection.setBackends(list);
+    }).catch(function () {}).finally(function () {
+      if (callback) callback();
+    });
   }
 
   document.addEventListener('i18n:changed', function () {
@@ -699,8 +902,17 @@
     }
     loadBackendsAndStatus(true);
     loadRequests();
-    loadRoutingConfig();
+    fetchCachedBackendsThen(function () {
+      loadRoutingConfig();
+    });
     renderVersionInfo();
+    if (_tsChart) {
+      _tsChart.data.datasets[0].label = t('chartRequests');
+      _tsChart.data.datasets[1].label = t('chartTokens');
+      _tsChart.options.scales.y.title.text = t('chartRequests');
+      _tsChart.options.scales.y1.title.text = t('chartTokens');
+      _tsChart.update('none');
+    }
     if (window.Inspection && window.Inspection.getSelectedId()) window.Inspection.refreshDetail();
   });
 
@@ -750,6 +962,7 @@
         var events = body.events || [];
         if (events.indexOf('requests') !== -1) {
           loadRequests();
+          loadTimeseries();
           if (window.Inspection && window.Inspection.getSelectedId()) window.Inspection.refreshDetail();
         }
         if (events.indexOf('backends') !== -1) loadBackendsAndStatus();
@@ -789,13 +1002,17 @@
     loadBackendsAndStatus(true);
     loadRequests();
     loadBackendVersion();
-    updateCachedBackends();
-    loadRoutingConfig();
+    fetchCachedBackendsThen(function () {
+      loadRoutingConfig();
+    });
     renderVersionInfo();
+    initChart();
+    loadTimeseries();
     startNotifyPoll();
     setInterval(function () {
       loadRequests();
       loadBackendsAndStatus();
+      loadTimeseries();
     }, FALLBACK_POLL_INTERVAL_MS);
   }
 

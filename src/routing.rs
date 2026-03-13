@@ -58,10 +58,7 @@ impl Default for RoutingConfig {
 
 /// Default routing config path: `~/.pomfret/routing.conf`.
 pub fn default_routing_config_path() -> std::path::PathBuf {
-    let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
-    std::path::PathBuf::from(home)
-        .join(".pomfret")
-        .join("routing.conf")
+    crate::config::home_dir().join(".pomfret").join("routing.conf")
 }
 
 /// Load routing config from a TOML file.

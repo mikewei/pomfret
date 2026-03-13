@@ -33,7 +33,7 @@ async fn api_backends_list_and_add() {
     let bytes = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
     let list: Vec<serde_json::Value> = serde_json::from_slice(&bytes).unwrap();
     assert!(list.len() >= 1);
-    assert_eq!(list[0]["id"], "ollama");
+    assert!(list[0]["id"].as_str().map_or(false, |s| !s.is_empty()));
     assert_eq!(list[0]["name"], "Ollama");
     assert_eq!(list[0]["backend_type"], "ollama");
 

@@ -91,21 +91,43 @@
 
       <div id="panel-dashboard" class="tab-panel" role="tabpanel" hidden>
         <section class="card">
-          <h2 class="card-title" data-i18n="tabDashboard">Dashboard</h2>
-          <p class="card-desc" data-i18n="dashboardDesc">Connection status and backend usage overview.</p>
-          <div class="stat-row">
-            <span class="stat-label" data-i18n="totalRequests">Total requests</span>
-            <span class="stat-value" id="client-total">0</span>
+          <div class="dashboard-header-row">
+            <h3 class="sub-title" data-i18n="dashboardTitle">Overview</h3>
+            <div class="time-range-switch" role="group" aria-label="Time range">
+              <button type="button" class="time-range-btn active" data-range="5h" data-i18n="rangeLast5h">Last 5h</button>
+              <button type="button" class="time-range-btn" data-range="all" data-i18n="rangeSinceStartup">Since startup</button>
+            </div>
+          </div>
+          <div class="stats-grid">
+            <div class="stat-row">
+              <span class="stat-label" data-i18n="totalRequests">Total requests</span>
+              <span class="stat-value" id="client-total">0</span>
+            </div>
+            <div class="stat-row">
+              <span class="stat-label" data-i18n="totalTokens">Total tokens</span>
+              <span class="stat-value" id="stat-total-tokens">0</span>
+            </div>
+            <div class="stat-row">
+              <span class="stat-label" data-i18n="promptTokens">Prompt tokens</span>
+              <span class="stat-value stat-value-sub" id="stat-prompt-tokens">0</span>
+            </div>
+            <div class="stat-row">
+              <span class="stat-label" data-i18n="completionTokens">Completion tokens</span>
+              <span class="stat-value stat-value-sub" id="stat-completion-tokens">0</span>
+            </div>
           </div>
           <h3 class="sub-title" data-i18n="backendConnectivity">Backend connectivity &amp; usage</h3>
-          <button type="button" class="btn btn-secondary btn-small" id="refresh-status" data-i18n="refreshStatus">Refresh status</button>
           <div class="table-wrap">
             <table class="data-table">
               <thead>
-                <tr><th data-i18n="name">Name</th><th data-i18n="reachable">Reachable</th><th data-i18n="requests">Requests</th><th data-i18n="lastRequest">Last request</th></tr>
+                <tr><th data-i18n="name">Name</th><th data-i18n="reachable">Reachable</th><th data-i18n="requests">Requests</th><th data-i18n="tokens">Tokens</th><th data-i18n="lastRequest">Last request</th></tr>
               </thead>
               <tbody id="backend-status"></tbody>
             </table>
+          </div>
+          <h3 class="sub-title chart-section-title" data-i18n="chartTitle">Requests &amp; Tokens</h3>
+          <div class="chart-wrap">
+            <canvas id="timeseries-chart" height="260"></canvas>
           </div>
         </section>
       </div>
@@ -124,8 +146,8 @@
                       <th data-i18n="time">Time</th>
                       <th data-i18n="method">Method</th>
                       <th data-i18n="path">Path</th>
-                      <th data-i18n="backend">Backend</th>
                       <th data-i18n="model">Model</th>
+                      <th data-i18n="backendModel">Backend (Model)</th>
                       <th data-i18n="status">Status</th>
                     </tr>
                   </thead>
@@ -171,6 +193,7 @@
       </div>
     </div>
   </div>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
   <script src="/static/js/i18n.js"></script>
   <script src="/static/js/inspection.js"></script>
   <script src="/static/js/app.js"></script>

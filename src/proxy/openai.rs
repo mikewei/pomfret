@@ -152,6 +152,36 @@ fn reconstruct_from_sse(raw: &str) -> String {
     serde_json::to_string(&result).unwrap_or_else(|_| raw.to_string())
 }
 
+/// Extract token usage from a response body JSON string.
+/// Supports OpenAI format (prompt_tokens/completion_tokens/total_tokens)
+/// and Anthropic format (input_tokens/output_tokens).
+fn extract_usage(body: &str) -> (Option<u64>, Option<u64>, Option<u64>) {
+    let val: serde_json::Value = match serde_json::from_str(body) {
+        Ok(v) => v,
+        Err(_) => return (None, None, None),
+    };
+    let usage = match val.get("usage") {
+        Some(u) if !u.is_null() => u,
+        _ => return (None, None, None),
+    };
+    let prompt = usage
+        .get("prompt_tokens")
+        .or_else(|| usage.get("input_tokens"))
+        .and_then(|v| v.as_u64());
+    let completion = usage
+        .get("completion_tokens")
+        .or_else(|| usage.get("output_tokens"))
+        .and_then(|v| v.as_u64());
+    let total = usage
+        .get("total_tokens")
+        .and_then(|v| v.as_u64())
+        .or_else(|| match (prompt, completion) {
+            (Some(p), Some(c)) => Some(p + c),
+            _ => None,
+        });
+    (prompt, completion, total)
+}
+
 /// POST /v1/chat/completions — forward to current backend.
 /// Returns 503 if no backend selected; 502 on backend error.
 #[tracing::instrument(skip(state, request))]
@@ -223,6 +253,7 @@ pub async fn handle_chat_completions(
 
     let backend_id = backend.id.clone();
     let backend_name = backend.name.clone();
+    let actual_model = backend.model.clone().or_else(|| model.clone());
     let provider = match create_provider(backend) {
         Ok(p) => p,
         Err(_) => {
@@ -241,7 +272,9 @@ pub async fn handle_chat_completions(
         request_query,
         request_headers,
         Some(backend_id),
+        Some(backend_name.clone()),
         model.clone(),
+        actual_model,
         Some(req_body_str),
     );
     let record_id = record.id.clone();
@@ -256,10 +289,12 @@ pub async fn handle_chat_completions(
             let status = StatusCode::OK;
             let resp_str = String::from_utf8_lossy(&resp_bytes).to_string();
             let resp_hdrs = response_headers_json("application/json");
+            let (pt, ct, tt) = extract_usage(&resp_str);
             state
                 .store
                 .update_response(&record_id, Some(resp_str), Some(status.as_u16()), Some(resp_hdrs))
                 .await;
+            state.store.update_tokens(&record_id, pt, ct, tt).await;
             let _ = state.notify_tx.send(NotifyEvent::Requests);
             (
                 status,
@@ -293,6 +328,7 @@ pub async fn handle_chat_completions(
                         None => {
                             let raw = String::from_utf8_lossy(&buf).to_string();
                             let body = reconstruct_from_sse(&raw);
+                            let (pt, ct, tt) = extract_usage(&body);
                             store
                                 .update_response(
                                     &rid,
@@ -301,6 +337,7 @@ pub async fn handle_chat_completions(
                                     Some(hdrs),
                                 )
                                 .await;
+                            store.update_tokens(&rid, pt, ct, tt).await;
                             let _ = tx.send(NotifyEvent::Requests);
                             None
                         }
@@ -389,6 +426,8 @@ pub async fn handle_models(
         request_query,
         request_headers,
         Some(backend_id),
+        Some(backend_name.clone()),
+        None,
         None,
         None,
     );

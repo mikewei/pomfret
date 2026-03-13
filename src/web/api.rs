@@ -34,7 +34,11 @@ pub struct RequestListItem {
     method: String,
     path: String,
     backend_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    backend_name: Option<String>,
     model: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    backend_model: Option<String>,
     status: Option<u16>,
     created_at: f64,
 }
@@ -61,6 +65,9 @@ pub struct BackendStatusItem {
     last_error: Option<String>,
     request_count: usize,
     last_request_at: Option<f64>,
+    prompt_tokens: u64,
+    completion_tokens: u64,
+    total_tokens: u64,
 }
 
 #[derive(Deserialize)]
@@ -83,6 +90,7 @@ pub fn router(state: WebState) -> Router<WebState> {
         .route("/requests", get(list_requests))
         .route("/requests/:id", get(get_request))
         .route("/stats", get(stats))
+        .route("/stats/timeseries", get(timeseries))
         .route("/notify", get(notify))
         .route("/backends", get(list_backends).post(create_backend))
         .route("/backends/status", get(backends_status))
@@ -133,9 +141,42 @@ async fn notify(
         .into_response()
 }
 
-async fn stats(State(state): State<WebState>) -> Json<serde_json::Value> {
-    let s = state.store.get_stats().await;
-    Json(serde_json::json!({ "total_requests": s.total }))
+#[derive(Deserialize)]
+struct StatsQuery {
+    since: Option<f64>,
+}
+
+async fn stats(
+    State(state): State<WebState>,
+    Query(q): Query<StatsQuery>,
+) -> Json<serde_json::Value> {
+    let s = state.store.get_stats(q.since).await;
+    Json(serde_json::json!({
+        "total_requests": s.total,
+        "total_prompt_tokens": s.total_prompt_tokens,
+        "total_completion_tokens": s.total_completion_tokens,
+        "total_tokens": s.total_tokens,
+    }))
+}
+
+#[derive(Deserialize)]
+struct TimeseriesQuery {
+    #[serde(default = "default_ts_hours")]
+    hours: u64,
+    #[serde(default = "default_ts_bucket")]
+    bucket: u64,
+}
+fn default_ts_hours() -> u64 { 24 }
+fn default_ts_bucket() -> u64 { 60 }
+
+async fn timeseries(
+    State(state): State<WebState>,
+    Query(q): Query<TimeseriesQuery>,
+) -> Json<Vec<crate::store::TimeseriesBucket>> {
+    let hours = q.hours.min(168);
+    let bucket = q.bucket.max(10).min(3600);
+    let data = state.store.get_timeseries(hours, bucket).await;
+    Json(data)
 }
 
 async fn list_requests(State(state): State<WebState>) -> Json<Vec<RequestListItem>> {
@@ -147,7 +188,9 @@ async fn list_requests(State(state): State<WebState>) -> Json<Vec<RequestListIte
             method: r.method,
             path: r.path,
             backend_id: r.backend_id,
+            backend_name: r.backend_name,
             model: r.model,
+            backend_model: r.backend_model,
             status: r.status,
             created_at: r.created_at,
         })
@@ -167,7 +210,9 @@ async fn get_request(
         "request_query": r.request_query,
         "request_headers": r.request_headers,
         "backend_id": r.backend_id,
+        "backend_name": r.backend_name,
         "model": r.model,
+        "backend_model": r.backend_model,
         "request_body": r.request_body,
         "response_body": r.response_body,
         "status": r.status,
@@ -217,7 +262,7 @@ async fn probe_backend(b: &BackendConfig) -> (bool, Option<String>) {
 
 async fn backends_status(State(state): State<WebState>) -> Json<Vec<BackendStatusItem>> {
     let backends = state.app_state.list_backends().await;
-    let stats = state.store.get_stats().await;
+    let stats = state.store.get_stats(None).await;
     let mut items = Vec::with_capacity(backends.len());
     for b in backends.into_iter() {
         let (reachable, last_error) = probe_backend(&b).await;
@@ -234,6 +279,9 @@ async fn backends_status(State(state): State<WebState>) -> Json<Vec<BackendStatu
             } else {
                 None
             },
+            prompt_tokens: bs.prompt_tokens,
+            completion_tokens: bs.completion_tokens,
+            total_tokens: bs.total_tokens,
         });
     }
     Json(items)

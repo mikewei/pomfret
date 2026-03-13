@@ -451,6 +451,17 @@ body {
   font-family: var(--font-mono);
   font-size: 0.85rem;
 }
+.backend-fields input:-webkit-autofill,
+.backend-fields input:-webkit-autofill:hover,
+.backend-fields input:-webkit-autofill:focus,
+.backend-fields select:-webkit-autofill,
+.backend-fields select:-webkit-autofill:hover,
+.backend-fields select:-webkit-autofill:focus {
+  -webkit-box-shadow: 0 0 0 1000px var(--bg-page) inset;
+  -webkit-text-fill-color: var(--text);
+  caret-color: var(--text);
+  transition: background-color 5000s ease-in-out 0s;
+}
 .backend-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
 
 .backend-add-row {
@@ -475,12 +486,32 @@ body {
 .sub-card { background: var(--bg-input); border-radius: var(--radius-sm); padding: 1rem; border: 1px solid var(--border); }
 .sub-title {
   margin: 0 0 0.75rem;
-  font-size: 1rem;
+  font-size: 1.08rem;
   font-weight: 600;
 }
+.chart-section-title {
+  margin-top: 2rem;
+}
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.75rem;
+  margin-bottom: 1.75rem;
+}
+@media (max-width: 800px) { .stats-grid { grid-template-columns: repeat(2, 1fr); } }
+.stats-grid .stat-row {
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0.85rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
 .stat-row { margin-bottom: 0.75rem; }
-.stat-label { font-size: 0.85rem; color: var(--text-muted); margin-right: 0.5rem; }
-.stat-value { font-size: 1.25rem; font-weight: 600; color: var(--accent); }
+.stat-label { font-size: 0.8rem; color: var(--text-muted); }
+.stat-value { font-size: 1.35rem; font-weight: 600; color: var(--accent); font-family: var(--font-mono); }
+.stat-value-sub { font-size: 1.15rem; color: var(--text); }
 
 .table-wrap { overflow-x: auto; }
 .data-table {
@@ -757,6 +788,17 @@ body {
   font-family: var(--font-mono);
   font-size: 0.85rem;
 }
+.routing-rule-fields input:-webkit-autofill,
+.routing-rule-fields input:-webkit-autofill:hover,
+.routing-rule-fields input:-webkit-autofill:focus,
+.routing-rule-fields select:-webkit-autofill,
+.routing-rule-fields select:-webkit-autofill:hover,
+.routing-rule-fields select:-webkit-autofill:focus {
+  -webkit-box-shadow: 0 0 0 1000px var(--bg-page) inset;
+  -webkit-text-fill-color: var(--text);
+  caret-color: var(--text);
+  transition: background-color 5000s ease-in-out 0s;
+}
 .routing-rule-actions {
   display: flex;
   gap: 0.5rem;
@@ -768,6 +810,51 @@ body {
 .routing-add-row .routing-btn-add {
   width: 100%;
   justify-content: center;
+}
+
+/* Dashboard header with time range selector */
+.dashboard-header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+.dashboard-header-row .sub-title { margin: 0; }
+.time-range-switch {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--bg-input);
+  flex-shrink: 0;
+}
+.time-range-btn {
+  padding: 0.3rem 0.75rem;
+  font-size: 0.78rem;
+  font-weight: 500;
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 0.15s, color 0.15s;
+  white-space: nowrap;
+}
+.time-range-btn:hover { color: var(--text-muted); }
+.time-range-btn.active {
+  background: var(--border);
+  color: var(--text);
+}
+.time-range-btn + .time-range-btn { border-left: 1px solid var(--border); }
+
+/* Chart */
+.chart-wrap {
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 1rem;
+  margin-top: 0.75rem;
 }
 
 .hidden { display: none !important; }

@@ -2,4 +2,4 @@
 
 mod memory;
 
-pub use memory::{BackendStats, MemoryStore, RequestRecord, StoreStats};
+pub use memory::{BackendStats, MemoryStore, RequestRecord, StoreStats, TimeseriesBucket};

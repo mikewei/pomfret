@@ -14,6 +14,25 @@
   var detailResponseEl = null;
   var selectedId = null;
   var requestsCache = [];
+  var backendsMap = {};
+
+  function setBackends(list) {
+    backendsMap = {};
+    (list || []).forEach(function (b) { backendsMap[b.id] = b.name || b.id; });
+  }
+
+  function backendLabel(id) {
+    if (!id) return '-';
+    return backendsMap[id] || id;
+  }
+
+  function backendModelLabel(r) {
+    var name = r.backend_name || backendLabel(r.backend_id);
+    var bm = r.backend_model;
+    if (!name || name === '-') return '-';
+    if (bm) return name + ' (' + bm + ')';
+    return name;
+  }
 
   function escapeHtml(s) {
     if (s == null) return '';
@@ -300,7 +319,7 @@
     html += '<div class="insp-meta-title">' + escapeHtml(t(titleKey)) + '</div>';
     html += '<table class="insp-meta-table"><tbody>';
     rows.forEach(function (r) {
-      html += '<tr><td class="insp-meta-name">' + escapeHtml(r[0]) + '</td><td class="insp-meta-value">' + escapeHtml(String(r[1])) + '</td></tr>';
+      html += '<tr><td class="insp-meta-name" title="' + escapeHtml(r[0]) + '">' + escapeHtml(r[0]) + '</td><td class="insp-meta-value" title="' + escapeHtml(String(r[1])) + '">' + escapeHtml(String(r[1])) + '</td></tr>';
     });
     html += '</tbody></table></div>';
     return html;
@@ -314,8 +333,8 @@
       ['Method', data.method || '-'],
       ['Path', data.path || '-'],
       ['Time', time],
-      ['Backend', data.backend_id || '-'],
-      ['Model', data.model || '-']
+      ['Model', data.model || '-'],
+      ['Backend (Model)', backendModelLabel(data)]
     ];
 
     var requestRows = [];
@@ -417,9 +436,9 @@
       return '<tr class="insp-trace-row' + selected + '" data-id="' + escapeHtml(r.id) + '" role="button" tabindex="0">' +
         '<td class="insp-cell-time">' + escapeHtml(time) + '</td>' +
         '<td class="insp-cell-method">' + escapeHtml(r.method) + '</td>' +
-        '<td class="insp-cell-path">' + escapeHtml(r.path) + '</td>' +
-        '<td class="insp-cell-backend">' + escapeHtml(r.backend_id || '-') + '</td>' +
-        '<td class="insp-cell-model">' + escapeHtml(r.model || '-') + '</td>' +
+        '<td class="insp-cell-path" title="' + escapeHtml(r.path) + '">' + escapeHtml(r.path) + '</td>' +
+        '<td class="insp-cell-model" title="' + escapeHtml(r.model || '-') + '">' + escapeHtml(r.model || '-') + '</td>' +
+        '<td class="insp-cell-backend" title="' + escapeHtml(backendModelLabel(r)) + '">' + escapeHtml(backendModelLabel(r)) + '</td>' +
         '<td class="insp-cell-status ' + statusClass + '">' + statusText + '</td>' +
         '</tr>';
     }).join('');
@@ -493,6 +512,7 @@
   global.Inspection = {
     init: init,
     setT: setT,
+    setBackends: setBackends,
     loadRequests: loadRequests,
     showDetail: showDetail,
     getSelectedId: getSelectedId,

@@ -59,7 +59,7 @@ impl Config {
     pub fn default_with_examples() -> Self {
         Self {
             backends: vec![BackendConfig {
-                id: "ollama".to_string(),
+                id: Uuid::new_v4().to_string(),
                 name: "Ollama".to_string(),
                 base_url: "http://127.0.0.1:11434/v1".to_string(),
                 api_key: None,
@@ -147,10 +147,17 @@ pub struct ResolvedConfig {
     pub config: Config,
 }
 
+/// Cross-platform home directory: `HOME` on Unix, `USERPROFILE` on Windows.
+pub fn home_dir() -> std::path::PathBuf {
+    std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| std::path::PathBuf::from("."))
+}
+
 /// Returns default backends config path: `~/.pomfret/backends.conf`.
 pub fn default_backends_config_path() -> std::path::PathBuf {
-    let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
-    std::path::PathBuf::from(home).join(".pomfret").join("backends.conf")
+    home_dir().join(".pomfret").join("backends.conf")
 }
 
 /// Serialize in-memory config to TOML string (for save/export to backends.conf).
