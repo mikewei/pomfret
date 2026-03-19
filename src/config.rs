@@ -19,6 +19,7 @@ pub enum BackendType {
     #[serde(rename = "openai_compat", alias = "open_ai_compat")]
     OpenAiCompat,
     Ollama,
+    Gemini,
 }
 
 /// Single LLM backend configuration.

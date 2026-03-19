@@ -52,6 +52,8 @@ pub struct BackendListItem {
     #[serde(skip_serializing_if = "Option::is_none")]
     api_key_set: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    api_key_hint: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     model: Option<String>,
 }
 
@@ -227,6 +229,10 @@ async fn list_backends(State(state): State<WebState>) -> Json<Vec<BackendListIte
         .into_iter()
         .map(|b| BackendListItem {
             api_key_set: Some(b.api_key.as_ref().map(|k| !k.is_empty()).unwrap_or(false)),
+            api_key_hint: b
+                .api_key
+                .as_ref()
+                .and_then(|k| masked_secret_hint(k)),
             model: b.model.clone(),
             id: b.id,
             name: b.name,
@@ -237,9 +243,34 @@ async fn list_backends(State(state): State<WebState>) -> Json<Vec<BackendListIte
     Json(items)
 }
 
+fn masked_secret_hint(secret: &str) -> Option<String> {
+    let s = secret.trim();
+    if s.is_empty() {
+        return None;
+    }
+    // Show only first/last char; keep masked length identical to plaintext length.
+    let chars: Vec<char> = s.chars().collect();
+    match chars.len() {
+        0 => None,
+        1 => Some(chars[0].to_string()),
+        2 => Some(format!("{}{}", chars[0], chars[1])),
+        n => {
+            let mut out = String::with_capacity(s.len());
+            out.push(chars[0]);
+            out.extend(std::iter::repeat('*').take(n - 2));
+            out.push(chars[n - 1]);
+            Some(out)
+        }
+    }
+}
+
 /// Probe backend: GET base_url/models with short timeout.
 async fn probe_backend(b: &BackendConfig) -> (bool, Option<String>) {
-    let url = format!("{}/models", b.base_url.trim_end_matches('/'));
+    let base = match b.backend_type {
+        BackendType::Gemini => crate::providers::gemini::resolve_base_url(&b.base_url),
+        _ => b.base_url.trim_end_matches('/').to_string(),
+    };
+    let url = format!("{}/models", base);
     let client = match reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(5))
         .build()

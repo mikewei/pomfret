@@ -4,6 +4,7 @@
 //! model listing. Use [`create_provider`] to instantiate the right
 //! implementation based on [`BackendType`].
 
+pub(crate) mod gemini;
 mod ollama;
 mod openai_compat;
 
@@ -64,5 +65,6 @@ pub fn create_provider(
             Ok(Box::new(openai_compat::OpenAiCompatProvider::new(config)?))
         }
         BackendType::Ollama => Ok(Box::new(ollama::OllamaProvider::new(config)?)),
+        BackendType::Gemini => Ok(Box::new(gemini::GeminiProvider::new(config)?)),
     }
 }

@@ -193,6 +193,16 @@
       </div>
     </div>
   </div>
+  <div id="confirm-modal" class="modal-overlay" hidden role="dialog" aria-labelledby="confirm-modal-title" aria-modal="true">
+    <div class="modal confirm-modal-inner" onclick="event.stopPropagation()">
+      <h3 id="confirm-modal-title" class="modal-title" data-i18n="confirmTitle">Confirm</h3>
+      <p class="modal-desc" id="confirm-modal-desc"></p>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-danger" id="confirm-modal-ok" data-i18n="delete">Delete</button>
+        <button type="button" class="btn btn-ghost" id="confirm-modal-cancel" data-i18n="cancel">Cancel</button>
+      </div>
+    </div>
+  </div>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
   <script src="/static/js/i18n.js"></script>
   <script src="/static/js/inspection.js"></script>

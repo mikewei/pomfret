@@ -1,9 +1,11 @@
 //! OpenAI-compatible API handlers: parse request, call backend, return response.
 
+use crate::config::BackendType;
 use crate::providers::{create_provider, ProviderError, ProviderResponse};
 use crate::routing::resolve_backend;
 use crate::store::RequestRecord;
 use crate::web::{NotifyEvent, WebState};
+use super::tsig;
 use axum::body::Body;
 use axum::extract::{Request, State};
 use axum::http::{header, HeaderMap, StatusCode};
@@ -50,9 +52,15 @@ fn response_headers_json(content_type: &str) -> String {
 /// Reconstruct a chat completion response from accumulated SSE chunks.
 /// Parses `data: {...}` lines, assembles content/reasoning deltas, and builds
 /// a standard non-streaming response JSON. Falls back to raw text on failure.
+///
+/// Preserves all delta fields (not just content/reasoning_content), so that
+/// provider-specific extras (e.g. Gemini `extra_content`) appear in the
+/// reconstructed response shown in the inspection UI.
 fn reconstruct_from_sse(raw: &str) -> String {
     let mut content = String::new();
     let mut reasoning_content = String::new();
+    let mut extra_strings: HashMap<String, String> = HashMap::new();
+    let mut extra_values: serde_json::Map<String, serde_json::Value> = serde_json::Map::new();
     let mut id: Option<String> = None;
     let mut model: Option<String> = None;
     let mut created: Option<u64> = None;
@@ -60,6 +68,8 @@ fn reconstruct_from_sse(raw: &str) -> String {
     let mut finish_reason: Option<String> = None;
     let mut usage: Option<serde_json::Value> = None;
     let mut parsed_any = false;
+
+    const KNOWN_DELTA_KEYS: &[&str] = &["role", "content", "reasoning_content"];
 
     for line in raw.lines() {
         let data = match line
@@ -92,7 +102,7 @@ fn reconstruct_from_sse(raw: &str) -> String {
         }
         if let Some(choices) = chunk.get("choices").and_then(|v| v.as_array()) {
             for choice in choices {
-                if let Some(delta) = choice.get("delta") {
+                if let Some(delta) = choice.get("delta").and_then(|v| v.as_object()) {
                     if role.is_none() {
                         role = delta
                             .get("role")
@@ -104,6 +114,19 @@ fn reconstruct_from_sse(raw: &str) -> String {
                     }
                     if let Some(c) = delta.get("reasoning_content").and_then(|v| v.as_str()) {
                         reasoning_content.push_str(c);
+                    }
+                    for (key, val) in delta.iter() {
+                        if KNOWN_DELTA_KEYS.contains(&key.as_str()) {
+                            continue;
+                        }
+                        if let Some(s) = val.as_str() {
+                            extra_strings
+                                .entry(key.clone())
+                                .or_default()
+                                .push_str(s);
+                        } else if !val.is_null() {
+                            extra_values.insert(key.clone(), val.clone());
+                        }
                     }
                 }
                 if finish_reason.is_none() {
@@ -132,6 +155,14 @@ fn reconstruct_from_sse(raw: &str) -> String {
     });
     if !reasoning_content.is_empty() {
         message["reasoning_content"] = serde_json::Value::String(reasoning_content);
+    }
+    if let Some(msg_obj) = message.as_object_mut() {
+        for (k, v) in &extra_strings {
+            msg_obj.insert(k.clone(), serde_json::Value::String(v.clone()));
+        }
+        for (k, v) in &extra_values {
+            msg_obj.insert(k.clone(), v.clone());
+        }
     }
 
     let mut result = serde_json::json!({
@@ -212,11 +243,27 @@ pub async fn handle_chat_completions(
         .ok()
         .and_then(|r| r.model);
 
+    // --- TSIG request decode: strip <<TSIG:…>> markers before routing ---
+    let tsig_result = tsig::strip_tsig_from_request(&body);
+    if let Some(ref tr) = tsig_result {
+        tracing::trace!(
+            extracted_messages = tr.sigs.len(),
+            "tsig: stripped markers from request (pre-routing)"
+        );
+    }
+    let (routing_body_str, routing_body_len) = if let Some(ref tr) = tsig_result {
+        let s = serde_json::to_string(&tr.body).unwrap_or_else(|_| req_body_str.clone());
+        let l = s.len();
+        (s, l)
+    } else {
+        (req_body_str.clone(), body.len())
+    };
+
     let backend = match resolve_backend(
         &state.app_state,
         model.as_deref(),
-        Some(&req_body_str),
-        body.len(),
+        Some(&routing_body_str),
+        routing_body_len,
     )
     .await
     {
@@ -232,7 +279,23 @@ pub async fn handle_chat_completions(
         }
     };
 
-    let body = if let Some(ref override_model) = backend.model {
+    let is_gemini = backend.backend_type == BackendType::Gemini;
+
+    // --- TSIG: for Gemini backends, write extracted signatures back ---
+    let body = if let Some(tr) = tsig_result {
+        let mut val = tr.body;
+        if is_gemini {
+            tsig::inject_tsig_to_gemini_request(&mut val, &tr.sigs);
+            tracing::trace!(
+                injected_messages = tr.sigs.len(),
+                "tsig: wrote thought_signature back into request for gemini"
+            );
+        }
+        if let Some(ref override_model) = backend.model {
+            val["model"] = serde_json::Value::String(override_model.clone());
+        }
+        bytes::Bytes::from(serde_json::to_vec(&val).unwrap_or_else(|_| body.to_vec()))
+    } else if let Some(ref override_model) = backend.model {
         match serde_json::from_slice::<serde_json::Value>(&body) {
             Ok(mut v) => {
                 v["model"] = serde_json::Value::String(override_model.clone());
@@ -286,8 +349,23 @@ pub async fn handle_chat_completions(
     match provider.chat_completions(body, stream).await {
         Ok(ProviderResponse::Body(resp_bytes)) => {
             tracing::info!(backend = %backend_name, status = 200, stream = false, "backend responded");
+            tracing::trace!(backend = %backend_name, body = %String::from_utf8_lossy(&resp_bytes), "raw response body");
             let status = StatusCode::OK;
-            let resp_str = String::from_utf8_lossy(&resp_bytes).to_string();
+            // --- TSIG response encode (non-streaming) ---
+            let final_bytes = if is_gemini {
+                let maybe = tsig::inject_tsig_response_body(&resp_bytes);
+                if let Some(ref b) = maybe {
+                    tracing::trace!(
+                        before_len = resp_bytes.len(),
+                        after_len = b.len(),
+                        "tsig: injected markers into non-streaming response body"
+                    );
+                }
+                maybe.unwrap_or(resp_bytes)
+            } else {
+                resp_bytes
+            };
+            let resp_str = String::from_utf8_lossy(&final_bytes).to_string();
             let resp_hdrs = response_headers_json("application/json");
             let (pt, ct, tt) = extract_usage(&resp_str);
             state
@@ -299,7 +377,7 @@ pub async fn handle_chat_completions(
             (
                 status,
                 [(header::CONTENT_TYPE, "application/json")],
-                resp_bytes.to_vec(),
+                final_bytes.to_vec(),
             )
                 .into_response()
         }
@@ -309,23 +387,115 @@ pub async fn handle_chat_completions(
             let notify_tx = state.notify_tx.clone();
             let resp_hdrs = response_headers_json("text/event-stream");
 
+            // --- TSIG response encode (streaming): for Gemini, transform
+            //     each SSE chunk to inject <<TSIG:…>> markers into content
+            //     deltas and strip the raw thought_signature fields. ---
             let recording_stream = unfold(
-                (s, Vec::<u8>::new(), store, record_id, resp_hdrs, notify_tx),
+                (
+                    s,
+                    Vec::<u8>::new(),
+                    store,
+                    record_id,
+                    resp_hdrs,
+                    notify_tx,
+                    is_gemini,
+                    Vec::<u8>::new(),
+                    false, // pending_flushed_to_client
+                ),
                 |state| async move {
-                    let (mut inner, mut buf, store, rid, hdrs, tx) = state;
+                    let (
+                        mut inner,
+                        mut buf,
+                        store,
+                        rid,
+                        hdrs,
+                        tx,
+                        is_gemini,
+                        mut pending,
+                        mut pending_flushed_to_client,
+                    ) = state;
                     match inner.next().await {
                         Some(Ok(chunk)) => {
-                            buf.extend_from_slice(&chunk);
+                            tracing::trace!(chunk = %String::from_utf8_lossy(&chunk), "raw stream chunk");
+                            let output = if is_gemini {
+                                let transformed = tsig::transform_sse_chunk(&chunk, &mut pending);
+                                if transformed.is_empty() && !pending.is_empty() {
+                                    tracing::trace!(
+                                        chunk_len = chunk.len(),
+                                        pending_len = pending.len(),
+                                        "tsig: buffered partial sse data (waiting for newline)"
+                                    );
+                                } else if !transformed.is_empty()
+                                    && transformed.as_ref() != chunk.as_ref()
+                                {
+                                    tracing::trace!(
+                                        before_len = chunk.len(),
+                                        after_len = transformed.len(),
+                                        pending_len = pending.len(),
+                                        "tsig: transformed sse chunk"
+                                    );
+                                }
+                                buf.extend_from_slice(&transformed);
+                                transformed
+                            } else {
+                                buf.extend_from_slice(&chunk);
+                                chunk
+                            };
                             Some((
-                                Ok::<_, io::Error>(Frame::data(chunk)),
-                                (inner, buf, store, rid, hdrs, tx),
+                                Ok::<_, io::Error>(Frame::data(output)),
+                                (
+                                    inner,
+                                    buf,
+                                    store,
+                                    rid,
+                                    hdrs,
+                                    tx,
+                                    is_gemini,
+                                    pending,
+                                    pending_flushed_to_client,
+                                ),
                             ))
                         }
                         Some(Err(e)) => Some((
                             Err(io::Error::new(io::ErrorKind::Other, e)),
-                            (inner, buf, store, rid, hdrs, tx),
+                            (
+                                inner,
+                                buf,
+                                store,
+                                rid,
+                                hdrs,
+                                tx,
+                                is_gemini,
+                                pending,
+                                pending_flushed_to_client,
+                            ),
                         )),
                         None => {
+                            // If we buffered partial lines (no newline boundaries), flush them once
+                            // to the client before terminating the stream.
+                            if is_gemini && !pending.is_empty() && !pending_flushed_to_client {
+                                let flushed = tsig::transform_sse_chunk(b"", &mut pending);
+                                pending_flushed_to_client = true;
+                                tracing::trace!(
+                                    flushed_len = flushed.len(),
+                                    "tsig: flushed pending sse buffer at stream end"
+                                );
+                                buf.extend_from_slice(&flushed);
+                                return Some((
+                                    Ok::<_, io::Error>(Frame::data(flushed)),
+                                    (
+                                        inner,
+                                        buf,
+                                        store,
+                                        rid,
+                                        hdrs,
+                                        tx,
+                                        is_gemini,
+                                        pending,
+                                        pending_flushed_to_client,
+                                    ),
+                                ));
+                            }
                             let raw = String::from_utf8_lossy(&buf).to_string();
                             let body = reconstruct_from_sse(&raw);
                             let (pt, ct, tt) = extract_usage(&body);
@@ -359,6 +529,7 @@ pub async fn handle_chat_completions(
                 _ => (StatusCode::BAD_GATEWAY, e.to_string()),
             };
             tracing::info!(backend = %backend_name, status = %code, "backend error");
+            tracing::trace!(backend = %backend_name, status = %code, body = %msg, "raw error response body");
             let resp_hdrs = response_headers_json("application/json");
             state
                 .store
@@ -441,6 +612,7 @@ pub async fn handle_models(
     match provider.get_models().await {
         Ok(bytes) => {
             tracing::info!(backend = %backend_name, status = 200, "backend models responded");
+            tracing::trace!(backend = %backend_name, body = %String::from_utf8_lossy(&bytes), "raw models response body");
             let resp_str = String::from_utf8_lossy(&bytes).to_string();
             state
                 .store
@@ -460,6 +632,7 @@ pub async fn handle_models(
                 _ => (StatusCode::BAD_GATEWAY, e.to_string()),
             };
             tracing::info!(backend = %backend_name, status = %code, "backend models error");
+            tracing::trace!(backend = %backend_name, status = %code, body = %msg, "raw models error response body");
             state
                 .store
                 .update_response(&record_id, Some(msg.clone()), Some(code.as_u16()), Some(resp_hdrs_ok))

@@ -20,6 +20,43 @@
       el.classList.remove('toast-visible');
     }, 1500);
   }
+
+  var _confirmModalResolve = null;
+  function initConfirmModal() {
+    var modal = document.getElementById('confirm-modal');
+    if (!modal) return;
+    var descEl = document.getElementById('confirm-modal-desc');
+    var okBtn = document.getElementById('confirm-modal-ok');
+    var cancelBtn = document.getElementById('confirm-modal-cancel');
+
+    function closeWith(val) {
+      modal.hidden = true;
+      var r = _confirmModalResolve;
+      _confirmModalResolve = null;
+      if (r) r(val);
+    }
+
+    if (okBtn) okBtn.onclick = function () { closeWith(true); };
+    if (cancelBtn) cancelBtn.onclick = function () { closeWith(false); };
+    modal.onclick = function (e) {
+      if (e.target === modal) closeWith(false);
+    };
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape' && modal && !modal.hidden) closeWith(false);
+    });
+    if (descEl) descEl.textContent = '';
+  }
+
+  function confirmModal(descText) {
+    var modal = document.getElementById('confirm-modal');
+    var descEl = document.getElementById('confirm-modal-desc');
+    if (!modal) return Promise.resolve(confirm(descText));
+    if (descEl) descEl.textContent = descText || '';
+    modal.hidden = false;
+    return new Promise(function (resolve) {
+      _confirmModalResolve = resolve;
+    });
+  }
   const gatewayUrlEl = document.getElementById('gateway-url');
   const curlChatEl = document.getElementById('curl-chat');
   const curlModelsEl = document.getElementById('curl-models');
@@ -29,6 +66,7 @@
   const tabButtons = document.querySelectorAll('.tab[data-tab]');
   const tabPanels = document.querySelectorAll('.tab-panel');
   const btnExportConfig = document.getElementById('btn-export-config');
+  initConfirmModal();
 
   function baseUrl() {
     return window.location.origin;
@@ -128,7 +166,7 @@
       html += '<p class="backends-empty">' + escapeHtml(t('noBackends')) + '</p>';
     }
     list.forEach(function (b, i) {
-      var typeLabel = (b.backend_type === 'ollama') ? t('backendTypeOllama') : t('backendTypeOpenAiCompat');
+      var typeLabel = (b.backend_type === 'ollama') ? t('backendTypeOllama') : (b.backend_type === 'gemini') ? t('backendTypeGemini') : t('backendTypeOpenAiCompat');
       html += '<div class="backend-row" data-index="' + i + '">';
       html += '<div class="backend-row-head" data-index="' + i + '">';
       html += '<span class="backend-row-name-wrap">';
@@ -140,9 +178,11 @@
       html += '<div class="backend-edit" data-index="' + i + '">';
       html += '<div class="backend-fields">';
       html += '<div><label>' + escapeHtml(t('name')) + '</label><input type="text" class="be-name" value="' + escapeHtml(b.name) + '" /></div>';
-      html += '<div><label>' + escapeHtml(t('backendType')) + '</label><select class="be-backend-type"><option value="ollama"' + (b.backend_type === 'ollama' ? ' selected' : '') + '>' + escapeHtml(t('backendTypeOllama')) + '</option><option value="openai_compat"' + (b.backend_type === 'openai_compat' ? ' selected' : '') + '>' + escapeHtml(t('backendTypeOpenAiCompat')) + '</option></select></div>';
+      html += '<div><label>' + escapeHtml(t('backendType')) + '</label><select class="be-backend-type"><option value="ollama"' + (b.backend_type === 'ollama' ? ' selected' : '') + '>' + escapeHtml(t('backendTypeOllama')) + '</option><option value="openai_compat"' + (b.backend_type === 'openai_compat' ? ' selected' : '') + '>' + escapeHtml(t('backendTypeOpenAiCompat')) + '</option><option value="gemini"' + (b.backend_type === 'gemini' ? ' selected' : '') + '>' + escapeHtml(t('backendTypeGemini')) + '</option></select></div>';
       html += '<div><label>' + escapeHtml(t('baseUrl')) + '</label><input type="text" class="be-base-url" value="' + escapeHtml(b.base_url) + '" placeholder="https://api.openai.com" /></div>';
-      html += '<div><label>' + escapeHtml(t('apiKeyLabel')) + '</label><input type="password" class="be-api-key" placeholder="' + escapeHtml(b.api_key_set ? t('apiKeySet') : t('apiKeyNotSet')) + '" autocomplete="off" /></div>';
+      var apiKeyPlaceholder = (b.api_key_set ? t('apiKeySet') : t('apiKeyNotSet'));
+      if (b.api_key_set && b.api_key_hint) apiKeyPlaceholder += ' ' + b.api_key_hint;
+      html += '<div><label>' + escapeHtml(t('apiKeyLabel')) + '</label><input type="password" class="be-api-key" placeholder="' + escapeHtml(apiKeyPlaceholder) + '" autocomplete="off" /></div>';
       html += '<div><label>' + escapeHtml(t('specifiedModel')) + '</label><input type="text" class="be-model" value="' + escapeHtml(b.model || '') + '" placeholder="' + escapeHtml(t('specifiedModelPlaceholder')) + '" /></div>';
       html += '</div>';
       html += '<div class="backend-actions">';
@@ -156,7 +196,7 @@
     html += '<div class="backend-edit backend-edit-new" id="backend-edit-new" hidden>';
     html += '<div class="backend-fields">';
     html += '<div><label>' + escapeHtml(t('name')) + '</label><input type="text" class="be-name" id="new-be-name" placeholder="" /></div>';
-    html += '<div><label>' + escapeHtml(t('backendType')) + '</label><select class="be-backend-type" id="new-be-backend-type"><option value="ollama">' + escapeHtml(t('backendTypeOllama')) + '</option><option value="openai_compat" selected>' + escapeHtml(t('backendTypeOpenAiCompat')) + '</option></select></div>';
+    html += '<div><label>' + escapeHtml(t('backendType')) + '</label><select class="be-backend-type" id="new-be-backend-type"><option value="ollama">' + escapeHtml(t('backendTypeOllama')) + '</option><option value="openai_compat" selected>' + escapeHtml(t('backendTypeOpenAiCompat')) + '</option><option value="gemini">' + escapeHtml(t('backendTypeGemini')) + '</option></select></div>';
     html += '<div><label>' + escapeHtml(t('baseUrl')) + '</label><input type="text" class="be-base-url" id="new-be-base-url" placeholder="https://api.openai.com" /></div>';
     html += '<div><label>' + escapeHtml(t('apiKeyLabel')) + '</label><input type="password" class="be-api-key" id="new-be-api-key" placeholder="' + escapeHtml(t('apiKeyNotSet')) + '" autocomplete="off" /></div>';
     html += '<div><label>' + escapeHtml(t('specifiedModel')) + '</label><input type="text" class="be-model" id="new-be-model" placeholder="' + escapeHtml(t('specifiedModelPlaceholder')) + '" /></div>';
@@ -783,8 +823,15 @@
         e.stopPropagation();
         var i = parseInt(btn.getAttribute('data-index'), 10);
         collectRuleEdits();
-        _routingConfig.rules.splice(i, 1);
-        renderRoutingRules();
+        confirmModal(t('confirmDeleteRoutingRule')).then(function (ok) {
+          if (!ok) return;
+          _routingConfig.rules.splice(i, 1);
+          // Re-render first to keep DOM indices consistent, then persist to disk.
+          renderRoutingRules();
+          saveRoutingConfig().then(function () {
+            renderRoutingRules();
+          });
+        });
       };
     });
 
