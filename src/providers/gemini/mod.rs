@@ -54,6 +54,10 @@ impl GeminiProvider {
     fn prepare_request_body(&self, body: Bytes) -> Bytes {
         match serde_json::from_slice::<serde_json::Value>(&body) {
             Ok(mut v) => {
+                // Gemini OpenAI-compat rejects unknown top-level fields like `store`.
+                if let Some(obj) = v.as_object_mut() {
+                    obj.remove("store");
+                }
                 thought_signature::inject_cached_signatures_into_gemini_request(
                     &mut v,
                     &self.thought_signatures,
@@ -173,6 +177,26 @@ impl LlmProvider for GeminiProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::{BackendConfig, BackendType};
+
+    #[test]
+    fn prepare_request_body_strips_store() {
+        let config = BackendConfig {
+            id: "t".into(),
+            name: "t".into(),
+            base_url: "".into(),
+            api_key: None,
+            backend_type: BackendType::Gemini,
+            model: None,
+        };
+        let p = GeminiProvider::new(config).unwrap();
+        let body = r#"{"model":"x","store":true,"messages":[]}"#;
+        let out = p.prepare_request_body(Bytes::from(body));
+        let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+        assert!(v.get("store").is_none(), "Gemini must not forward `store`");
+        assert_eq!(v.get("model").and_then(|m| m.as_str()), Some("x"));
+        assert!(v.get("messages").is_some());
+    }
 
     #[test]
     fn resolve_empty_url() {
