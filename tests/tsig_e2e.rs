@@ -1,11 +1,10 @@
-//! End-to-end tests for TSIG (thought-signature) encoding/decoding through
-//! the full gateway stack (POST /v1/chat/completions with a Gemini backend).
+//! End-to-end tests for Gemini `thought_signature` via server-side cache (tool_call id or `SIGID:` in `<think>`).
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use pomfret::config::{AppState, BackendConfig, BackendType, Config};
 use pomfret::store::MemoryStore;
-use pomfret::web::{router, NotifyEvent, WebState};
+use pomfret::web::{router, NotifyEvent, ProviderPool, WebState};
 use std::path::PathBuf;
 use tokio::sync::broadcast;
 use tower::ServiceExt;
@@ -20,6 +19,7 @@ fn test_web_state(app_state: AppState, store: MemoryStore) -> WebState {
         backends_path: PathBuf::from("/tmp/pomfret-tsig-test-backends.conf"),
         routing_path: PathBuf::from("/tmp/pomfret-tsig-test-routing.conf"),
         notify_tx,
+        provider_pool: ProviderPool::new(),
     }
 }
 
@@ -36,10 +36,8 @@ fn gemini_config(mock_uri: &str) -> Config {
     }
 }
 
-// ---- response path: non-streaming ----
-
 #[tokio::test]
-async fn gemini_non_stream_injects_tsig_into_content() {
+async fn gemini_non_stream_caches_sig_and_strips_from_client_body() {
     let mock = MockServer::start().await;
     let config = gemini_config(&mock.uri());
     let app_state = AppState::new(config);
@@ -88,28 +86,220 @@ async fn gemini_non_stream_injects_tsig_into_content() {
     let bytes = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
     let resp: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
 
-    let content = resp["choices"][0]["message"]["content"].as_str().unwrap();
-    assert!(
-        content.starts_with("<think>TSIG:SIG_ALPHA</think>"),
-        "content should contain TSIG marker, got: {}",
-        content
-    );
-
     assert!(
         resp["choices"][0]["message"]["tool_calls"][0]
             .get("extra_content")
             .is_none(),
-        "extra_content should be removed from tool_calls"
+        "thought_signature should be stripped from client response"
+    );
+    let content = &resp["choices"][0]["message"]["content"];
+    assert!(
+        content.is_null() || content.as_str() == Some(""),
+        "content should not get TSIG markers, got {:?}",
+        content
     );
 
     let records = store.list(10).await;
     assert_eq!(records.len(), 1);
     let stored = records[0].response_body.as_ref().unwrap();
-    assert!(stored.contains("<think>TSIG:SIG_ALPHA</think>"));
+    assert!(
+        !stored.contains("thought_signature"),
+        "stored reconstruction should not contain raw signature"
+    );
 }
 
 #[tokio::test]
-async fn non_gemini_backend_does_not_inject_tsig() {
+async fn gemini_message_level_sigid_roundtrip() {
+    let mock = MockServer::start().await;
+    let config = gemini_config(&mock.uri());
+    let app_state = AppState::new(config);
+    let store = MemoryStore::new(100);
+    let state = test_web_state(app_state, store);
+    let app = router(state);
+
+    let first_upstream = serde_json::json!({
+        "choices": [{
+            "message": {
+                "role": "assistant",
+                "content": "Plain reply",
+                "extra_content": { "google": { "thought_signature": "SIG_PLAIN" } }
+            },
+            "finish_reason": "stop"
+        }]
+    });
+
+    Mock::given(method("POST"))
+        .and(path("/v1beta/openai/chat/completions"))
+        .and(body_string_contains("thought_signature"))
+        .and(body_string_contains("SIG_PLAIN"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(
+            r#"{"choices":[{"message":{"role":"assistant","content":"Second."}}]}"#.as_bytes(),
+            "application/json",
+        ))
+        .expect(1)
+        .mount(&mock)
+        .await;
+
+    Mock::given(method("POST"))
+        .and(path("/v1beta/openai/chat/completions"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(
+            serde_json::to_vec(&first_upstream).unwrap(),
+            "application/json",
+        ))
+        .expect(1)
+        .mount(&mock)
+        .await;
+
+    let req1 = Request::builder()
+        .method("POST")
+        .uri("/v1/chat/completions")
+        .header("Content-Type", "application/json")
+        .body(Body::from(
+            r#"{"model":"gemini-3","messages":[{"role":"user","content":"Hi"}]}"#,
+        ))
+        .unwrap();
+    let res1 = app.clone().oneshot(req1).await.unwrap();
+    assert_eq!(res1.status(), StatusCode::OK);
+    let bytes1 = axum::body::to_bytes(res1.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let resp1: serde_json::Value = serde_json::from_slice(&bytes1).unwrap();
+    let content1 = resp1["choices"][0]["message"]["content"]
+        .as_str()
+        .expect("string content with SIGID");
+    assert!(
+        content1.contains("Plain reply") && content1.contains("SIGID:tsig_"),
+        "expected SIGID in content: {:?}",
+        content1
+    );
+    assert!(
+        content1.contains("<think>") && content1.contains("</think>"),
+        "expected think-wrapped SIGID: {:?}",
+        content1
+    );
+    assert!(
+        resp1["choices"][0]["message"]
+            .get("extra_content")
+            .is_none(),
+        "extra_content should be stripped"
+    );
+
+    let req_body2 = serde_json::json!({
+        "model": "gemini-3",
+        "messages": [
+            { "role": "user", "content": "Again" },
+            { "role": "assistant", "content": content1 }
+        ]
+    });
+
+    let req2 = Request::builder()
+        .method("POST")
+        .uri("/v1/chat/completions")
+        .header("Content-Type", "application/json")
+        .body(Body::from(serde_json::to_vec(&req_body2).unwrap()))
+        .unwrap();
+    let res2 = app.oneshot(req2).await.unwrap();
+    assert_eq!(res2.status(), StatusCode::OK);
+    let bytes2 = axum::body::to_bytes(res2.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    assert!(std::str::from_utf8(&bytes2).unwrap().contains("Second."));
+}
+
+#[tokio::test]
+async fn gemini_second_request_injects_cached_signature_by_tool_call_id() {
+    let mock = MockServer::start().await;
+    let config = gemini_config(&mock.uri());
+    let app_state = AppState::new(config);
+    let store = MemoryStore::new(100);
+    let state = test_web_state(app_state, store);
+    let app = router(state);
+
+    let first_upstream = serde_json::json!({
+        "choices": [{
+            "message": {
+                "role": "assistant",
+                "content": null,
+                "tool_calls": [{
+                    "extra_content": { "google": { "thought_signature": "SIG_ALPHA" } },
+                    "function": { "name": "check_flight", "arguments": "{}" },
+                    "id": "fc-1",
+                    "type": "function"
+                }]
+            },
+            "finish_reason": "tool_calls"
+        }]
+    });
+
+    // Second round: upstream must receive thought_signature from cache.
+    Mock::given(method("POST"))
+        .and(path("/v1beta/openai/chat/completions"))
+        .and(body_string_contains("thought_signature"))
+        .and(body_string_contains("SIG_ALPHA"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(
+            r#"{"choices":[{"message":{"role":"assistant","content":"Done."}}]}"#.as_bytes(),
+            "application/json",
+        ))
+        .expect(1)
+        .mount(&mock)
+        .await;
+
+    Mock::given(method("POST"))
+        .and(path("/v1beta/openai/chat/completions"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(
+            serde_json::to_vec(&first_upstream).unwrap(),
+            "application/json",
+        ))
+        .expect(1)
+        .mount(&mock)
+        .await;
+
+    let req1 = Request::builder()
+        .method("POST")
+        .uri("/v1/chat/completions")
+        .header("Content-Type", "application/json")
+        .body(Body::from(
+            r#"{"model":"gemini-3","messages":[{"role":"user","content":"Hi"}]}"#,
+        ))
+        .unwrap();
+    let res1 = app.clone().oneshot(req1).await.unwrap();
+    assert_eq!(res1.status(), StatusCode::OK);
+
+    let req_body2 = serde_json::json!({
+        "model": "gemini-3",
+        "messages": [
+            { "role": "user", "content": "Check flight AA100" },
+            {
+                "role": "assistant",
+                "content": null,
+                "tool_calls": [{
+                    "function": { "name": "check_flight", "arguments": "{}" },
+                    "id": "fc-1",
+                    "type": "function"
+                }]
+            },
+            {
+                "role": "tool",
+                "content": "{\"status\":\"delayed\"}",
+                "tool_call_id": "fc-1"
+            }
+        ]
+    });
+
+    let req2 = Request::builder()
+        .method("POST")
+        .uri("/v1/chat/completions")
+        .header("Content-Type", "application/json")
+        .body(Body::from(serde_json::to_vec(&req_body2).unwrap()))
+        .unwrap();
+    let res2 = app.oneshot(req2).await.unwrap();
+    assert_eq!(res2.status(), StatusCode::OK);
+    let bytes = axum::body::to_bytes(res2.into_body(), usize::MAX).await.unwrap();
+    assert!(std::str::from_utf8(&bytes).unwrap().contains("Done."));
+}
+
+#[tokio::test]
+async fn non_gemini_backend_does_not_touch_signatures() {
     let mock = MockServer::start().await;
     let config = Config {
         backends: vec![BackendConfig {
@@ -149,131 +339,11 @@ async fn non_gemini_backend_does_not_inject_tsig() {
 
     let bytes = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
     let s = std::str::from_utf8(&bytes).unwrap();
-    assert!(!s.contains("TSIG"));
     assert!(s.contains("Hello"));
 }
 
-// ---- request path: decode TSIG markers ----
-
 #[tokio::test]
-async fn gemini_request_decode_writes_back_tsig() {
-    let mock = MockServer::start().await;
-    let config = gemini_config(&mock.uri());
-    let app_state = AppState::new(config);
-    let store = MemoryStore::new(100);
-    let state = test_web_state(app_state, store);
-    let app = router(state);
-
-    Mock::given(method("POST"))
-        .and(path("/v1beta/openai/chat/completions"))
-        .and(body_string_contains("thought_signature"))
-        .and(body_string_contains("SIG_ALPHA"))
-        .respond_with(
-            ResponseTemplate::new(200).set_body_raw(
-                r#"{"choices":[{"message":{"role":"assistant","content":"Done."}}]}"#.as_bytes(),
-                "application/json",
-            ),
-        )
-        .mount(&mock)
-        .await;
-
-    let req_body = serde_json::json!({
-        "model": "gemini-3",
-        "messages": [
-            { "role": "user", "content": "Check flight AA100" },
-            {
-                "role": "assistant",
-                "content": "<think>TSIG:SIG_ALPHA</think>",
-                "tool_calls": [{
-                    "function": { "name": "check_flight", "arguments": "{\"flight\":\"AA100\"}" },
-                    "id": "fc-1", "type": "function"
-                }]
-            },
-            {
-                "role": "tool",
-                "content": "{\"status\":\"delayed\"}",
-                "tool_call_id": "fc-1"
-            }
-        ]
-    });
-
-    let req = Request::builder()
-        .method("POST")
-        .uri("/v1/chat/completions")
-        .header("Content-Type", "application/json")
-        .body(Body::from(serde_json::to_vec(&req_body).unwrap()))
-        .unwrap();
-    let res = app.oneshot(req).await.unwrap();
-    assert_eq!(
-        res.status(),
-        StatusCode::OK,
-        "upstream should have received thought_signature and matched"
-    );
-
-    let bytes = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
-    let s = std::str::from_utf8(&bytes).unwrap();
-    assert!(s.contains("Done."));
-}
-
-#[tokio::test]
-async fn non_gemini_request_strips_tsig_but_does_not_write_back() {
-    let mock = MockServer::start().await;
-    let config = Config {
-        backends: vec![BackendConfig {
-            id: "openai".to_string(),
-            name: "OpenAI".to_string(),
-            base_url: format!("{}/v1", mock.uri()),
-            api_key: None,
-            backend_type: BackendType::OpenAiCompat,
-            model: None,
-        }],
-    };
-    let app_state = AppState::new(config);
-    let store = MemoryStore::new(100);
-    let state = test_web_state(app_state, store);
-    let app = router(state);
-
-    Mock::given(method("POST"))
-        .and(path("/v1/chat/completions"))
-        .respond_with(
-            ResponseTemplate::new(200).set_body_raw(
-                r#"{"choices":[{"message":{"role":"assistant","content":"ok"}}]}"#.as_bytes(),
-                "application/json",
-            ),
-        )
-        .mount(&mock)
-        .await;
-
-    let req_body = serde_json::json!({
-        "model": "gpt-4",
-        "messages": [
-            { "role": "user", "content": "Hi" },
-            {
-                "role": "assistant",
-                "content": "text<<TSIG:SIG_X>>",
-                "tool_calls": [{
-                    "function": { "name": "f", "arguments": "{}" },
-                    "id": "fc-1", "type": "function"
-                }]
-            },
-            { "role": "tool", "content": "{}", "tool_call_id": "fc-1" }
-        ]
-    });
-
-    let req = Request::builder()
-        .method("POST")
-        .uri("/v1/chat/completions")
-        .header("Content-Type", "application/json")
-        .body(Body::from(serde_json::to_vec(&req_body).unwrap()))
-        .unwrap();
-    let res = app.oneshot(req).await.unwrap();
-    assert_eq!(res.status(), StatusCode::OK);
-}
-
-// ---- response path: streaming ----
-
-#[tokio::test]
-async fn gemini_stream_injects_tsig_into_delta_content() {
+async fn gemini_stream_caches_sig_and_strips_from_sse() {
     let mock = MockServer::start().await;
     let config = gemini_config(&mock.uri());
     let app_state = AppState::new(config);
@@ -296,8 +366,7 @@ async fn gemini_stream_injects_tsig_into_delta_content() {
     Mock::given(method("POST"))
         .and(path("/v1beta/openai/chat/completions"))
         .respond_with(
-            ResponseTemplate::new(200)
-                .set_body_raw(sse_body.into_bytes(), "text/event-stream"),
+            ResponseTemplate::new(200).set_body_raw(sse_body.into_bytes(), "text/event-stream"),
         )
         .mount(&mock)
         .await;
@@ -316,13 +385,13 @@ async fn gemini_stream_injects_tsig_into_delta_content() {
     let output = String::from_utf8_lossy(&bytes).to_string();
 
     assert!(
-        output.contains("<think>TSIG:STREAM_SIG</think>"),
-        "SSE output should contain TSIG marker, got:\n{}",
+        !output.contains("thought_signature"),
+        "SSE should strip thought_signature:\n{}",
         output
     );
     assert!(
-        !output.contains("thought_signature"),
-        "raw thought_signature should be removed from SSE output:\n{}",
+        !output.contains("STREAM_SIG"),
+        "raw signature should not appear in client SSE:\n{}",
         output
     );
     assert!(output.contains("[DONE]"), "stream should end with [DONE]");
@@ -332,7 +401,8 @@ async fn gemini_stream_injects_tsig_into_delta_content() {
     assert_eq!(records.len(), 1);
     let stored = records[0].response_body.as_ref().unwrap();
     assert!(
-        stored.contains("<think>TSIG:STREAM_SIG</think>"),
-        "store should contain TSIG marker in reconstructed body"
+        !stored.contains("thought_signature"),
+        "reconstructed store body should not contain signature: {}",
+        stored
     );
 }

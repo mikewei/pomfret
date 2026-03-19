@@ -4,7 +4,7 @@ use axum::body::Body;
 use axum::http::Request;
 use pomfret::config::{AppState, Config};
 use pomfret::store::{MemoryStore, RequestRecord};
-use pomfret::web::{router, NotifyEvent, WebState};
+use pomfret::web::{router, NotifyEvent, ProviderPool, WebState};
 use std::path::PathBuf;
 use tokio::sync::broadcast;
 use tower::ServiceExt;
@@ -20,6 +20,7 @@ fn make_state() -> WebState {
         backends_path: PathBuf::from("/tmp/pomfret-test-backends.conf"),
         routing_path: PathBuf::from("/tmp/pomfret-test-routing.conf"),
         notify_tx,
+        provider_pool: ProviderPool::new(),
     }
 }
 

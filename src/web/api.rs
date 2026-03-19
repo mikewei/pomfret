@@ -350,6 +350,7 @@ async fn create_backend(
         )
         .await;
     if ok {
+        state.provider_pool.clear();
         let _ = state.notify_tx.send(NotifyEvent::Backends);
     }
     Json(serde_json::json!({ "ok": ok }))
@@ -386,6 +387,7 @@ async fn update_backend(
         )
         .await;
     if ok {
+        state.provider_pool.clear();
         let _ = state.notify_tx.send(NotifyEvent::Backends);
     }
     Json(serde_json::json!({ "ok": ok }))
@@ -397,6 +399,7 @@ async fn delete_backend(
 ) -> Json<serde_json::Value> {
     let ok = state.app_state.delete_backend(index).await;
     if ok {
+        state.provider_pool.clear();
         let _ = state.notify_tx.send(NotifyEvent::Backends);
     }
     Json(serde_json::json!({ "ok": ok }))
@@ -427,9 +430,12 @@ async fn update_routing(
     State(state): State<WebState>,
     Json(body): Json<RoutingConfig>,
 ) -> Json<serde_json::Value> {
-    state.app_state.set_routing_config(body.clone()).await;
+    // Persist first so in-memory state never diverges from disk on write failure.
     match save_routing_config(&state.routing_path, &body) {
-        Ok(()) => Json(serde_json::json!({ "ok": true })),
+        Ok(()) => {
+            state.app_state.set_routing_config(body).await;
+            Json(serde_json::json!({ "ok": true }))
+        }
         Err(e) => Json(serde_json::json!({ "ok": false, "error": e.to_string() })),
     }
 }

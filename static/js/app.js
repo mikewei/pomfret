@@ -825,11 +825,15 @@
         collectRuleEdits();
         confirmModal(t('confirmDeleteRoutingRule')).then(function (ok) {
           if (!ok) return;
+          var removed = _routingConfig.rules[i];
           _routingConfig.rules.splice(i, 1);
-          // Re-render first to keep DOM indices consistent, then persist to disk.
+          // Optimistic UI; rollback if persist fails so client matches server on reload.
           renderRoutingRules();
-          saveRoutingConfig().then(function () {
-            renderRoutingRules();
+          saveRoutingConfig().then(function (res) {
+            if (!res || !res.ok) {
+              _routingConfig.rules.splice(i, 0, removed);
+              renderRoutingRules();
+            }
           });
         });
       };
@@ -839,8 +843,8 @@
     routingRulesListEl.querySelectorAll('.routing-btn-save').forEach(function (btn) {
       btn.onclick = function (e) {
         e.stopPropagation();
-        saveRoutingConfig().then(function () {
-          renderRoutingRules();
+        saveRoutingConfig().then(function (res) {
+          if (res && res.ok) renderRoutingRules();
         });
       };
     });
@@ -902,16 +906,25 @@
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body)
-    }).then(function (r) { return r.json(); }).then(function (res) {
-      if (res.ok) {
-        showToast(t('backendSaved'));
-      } else {
+    })
+      .then(function (r) {
+        return r.json().then(function (res) {
+          return { httpOk: r.ok, res: res || {} };
+        });
+      })
+      .then(function (pair) {
+        var res = pair.res;
+        if (pair.httpOk && res.ok) {
+          showToast(t('backendSaved'));
+          return { ok: true };
+        }
         showToast(t('routingSaveFailed'));
-      }
-      return res;
-    }).catch(function () {
-      showToast(t('routingSaveFailed'));
-    });
+        return { ok: false };
+      })
+      .catch(function () {
+        showToast(t('routingSaveFailed'));
+        return { ok: false };
+      });
   }
 
   if (btnExportRouting) {

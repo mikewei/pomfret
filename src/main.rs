@@ -4,9 +4,10 @@ use clap::Parser;
 use pomfret::config::{default_backends_config_path, resolve_config, AppState};
 use pomfret::routing::{default_routing_config_path, load_routing_config};
 use pomfret::store::MemoryStore;
-use pomfret::web::{router, NotifyEvent, WebState};
+use pomfret::web::{router, NotifyEvent, ProviderPool, WebState};
 use std::net::SocketAddr;
 use tokio::sync::broadcast;
+use tracing_subscriber::filter::LevelFilter;
 use tracing_subscriber::EnvFilter;
 
 #[derive(Parser)]
@@ -29,7 +30,11 @@ struct Cli {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::from_default_env())
+        .with_env_filter(
+            EnvFilter::builder()
+                .with_default_directive(LevelFilter::INFO.into())
+                .from_env_lossy(),
+        )
         .init();
 
     let cli = Cli::parse();
@@ -67,6 +72,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         backends_path,
         routing_path,
         notify_tx,
+        provider_pool: ProviderPool::new(),
     };
 
     let app = router(web_state);

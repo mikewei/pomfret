@@ -3,6 +3,7 @@
 //! All business logic lives here so it can be tested from `tests/` and used from `main.rs`.
 
 pub mod config;
+pub(crate) mod cache;
 pub mod embed;
 pub mod providers;
 pub mod proxy;

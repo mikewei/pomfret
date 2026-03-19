@@ -1,11 +1,9 @@
 //! OpenAI-compatible API handlers: parse request, call backend, return response.
 
-use crate::config::BackendType;
-use crate::providers::{create_provider, ProviderError, ProviderResponse};
+use crate::providers::{ProviderError, ProviderResponse};
 use crate::routing::resolve_backend;
 use crate::store::RequestRecord;
 use crate::web::{NotifyEvent, WebState};
-use super::tsig;
 use axum::body::Body;
 use axum::extract::{Request, State};
 use axum::http::{header, HeaderMap, StatusCode};
@@ -13,7 +11,7 @@ use axum::response::IntoResponse;
 use futures_util::stream::unfold;
 use http_body_util::{BodyExt, StreamBody};
 use http_body::Frame;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::io;
 use tokio_stream::StreamExt;
 
@@ -49,18 +47,56 @@ fn response_headers_json(content_type: &str) -> String {
     serde_json::to_string(&map).unwrap_or_default()
 }
 
+/// Merge one streaming `tool_calls[]` delta entry into an accumulated tool call (by `index`).
+fn merge_tool_call_object(
+    acc: &mut serde_json::Map<String, serde_json::Value>,
+    delta: &serde_json::Map<String, serde_json::Value>,
+) {
+    for (k, v) in delta {
+        if k == "index" {
+            continue;
+        }
+        if k == "function" {
+            let func_acc = acc
+                .entry("function".to_string())
+                .or_insert_with(|| serde_json::json!({}));
+            if let (Some(fo), Some(vo)) = (func_acc.as_object_mut(), v.as_object()) {
+                for (fk, fv) in vo {
+                    if fk == "arguments" {
+                        let prev = fo.get("arguments").and_then(|x| x.as_str()).unwrap_or("");
+                        if let Some(part) = fv.as_str() {
+                            fo.insert(
+                                "arguments".to_string(),
+                                serde_json::Value::String(format!("{prev}{part}")),
+                            );
+                        } else {
+                            fo.insert(fk.clone(), fv.clone());
+                        }
+                    } else {
+                        fo.insert(fk.clone(), fv.clone());
+                    }
+                }
+            } else {
+                acc.insert(k.clone(), v.clone());
+            }
+        } else {
+            acc.insert(k.clone(), v.clone());
+        }
+    }
+}
+
 /// Reconstruct a chat completion response from accumulated SSE chunks.
 /// Parses `data: {...}` lines, assembles content/reasoning deltas, and builds
 /// a standard non-streaming response JSON. Falls back to raw text on failure.
 ///
-/// Preserves all delta fields (not just content/reasoning_content), so that
-/// provider-specific extras (e.g. Gemini `extra_content`) appear in the
-/// reconstructed response shown in the inspection UI.
+/// Merges `content`, `reasoning_content`, `role`, and streaming `tool_calls`
+/// (by OpenAI-style `index`, concatenating `function.arguments`). Provider-specific
+/// delta keys other than these are still ignored.
 fn reconstruct_from_sse(raw: &str) -> String {
     let mut content = String::new();
     let mut reasoning_content = String::new();
-    let mut extra_strings: HashMap<String, String> = HashMap::new();
-    let mut extra_values: serde_json::Map<String, serde_json::Value> = serde_json::Map::new();
+    let mut tool_calls_by_index: BTreeMap<u64, serde_json::Map<String, serde_json::Value>> =
+        BTreeMap::new();
     let mut id: Option<String> = None;
     let mut model: Option<String> = None;
     let mut created: Option<u64> = None;
@@ -68,8 +104,6 @@ fn reconstruct_from_sse(raw: &str) -> String {
     let mut finish_reason: Option<String> = None;
     let mut usage: Option<serde_json::Value> = None;
     let mut parsed_any = false;
-
-    const KNOWN_DELTA_KEYS: &[&str] = &["role", "content", "reasoning_content"];
 
     for line in raw.lines() {
         let data = match line
@@ -115,17 +149,17 @@ fn reconstruct_from_sse(raw: &str) -> String {
                     if let Some(c) = delta.get("reasoning_content").and_then(|v| v.as_str()) {
                         reasoning_content.push_str(c);
                     }
-                    for (key, val) in delta.iter() {
-                        if KNOWN_DELTA_KEYS.contains(&key.as_str()) {
-                            continue;
-                        }
-                        if let Some(s) = val.as_str() {
-                            extra_strings
-                                .entry(key.clone())
-                                .or_default()
-                                .push_str(s);
-                        } else if !val.is_null() {
-                            extra_values.insert(key.clone(), val.clone());
+                    if let Some(tcs) = delta.get("tool_calls").and_then(|v| v.as_array()) {
+                        for tc in tcs {
+                            let Some(tc_obj) = tc.as_object() else {
+                                continue;
+                            };
+                            let idx = tc_obj
+                                .get("index")
+                                .and_then(|v| v.as_u64())
+                                .unwrap_or(0);
+                            let entry = tool_calls_by_index.entry(idx).or_default();
+                            merge_tool_call_object(entry, tc_obj);
                         }
                     }
                 }
@@ -149,20 +183,27 @@ fn reconstruct_from_sse(raw: &str) -> String {
         return raw.to_string();
     }
 
+    let has_tool_calls = !tool_calls_by_index.is_empty();
     let mut message = serde_json::json!({
         "role": role.unwrap_or_else(|| "assistant".to_string()),
-        "content": content,
+        "content": if content.is_empty() && has_tool_calls {
+            serde_json::Value::Null
+        } else {
+            serde_json::Value::String(content)
+        },
     });
     if !reasoning_content.is_empty() {
         message["reasoning_content"] = serde_json::Value::String(reasoning_content);
     }
-    if let Some(msg_obj) = message.as_object_mut() {
-        for (k, v) in &extra_strings {
-            msg_obj.insert(k.clone(), serde_json::Value::String(v.clone()));
-        }
-        for (k, v) in &extra_values {
-            msg_obj.insert(k.clone(), v.clone());
-        }
+    if !tool_calls_by_index.is_empty() {
+        let tool_calls: Vec<serde_json::Value> = tool_calls_by_index
+            .into_iter()
+            .map(|(_, mut m)| {
+                m.remove("index");
+                serde_json::Value::Object(m)
+            })
+            .collect();
+        message["tool_calls"] = serde_json::Value::Array(tool_calls);
     }
 
     let mut result = serde_json::json!({
@@ -243,27 +284,11 @@ pub async fn handle_chat_completions(
         .ok()
         .and_then(|r| r.model);
 
-    // --- TSIG request decode: strip <<TSIG:…>> markers before routing ---
-    let tsig_result = tsig::strip_tsig_from_request(&body);
-    if let Some(ref tr) = tsig_result {
-        tracing::trace!(
-            extracted_messages = tr.sigs.len(),
-            "tsig: stripped markers from request (pre-routing)"
-        );
-    }
-    let (routing_body_str, routing_body_len) = if let Some(ref tr) = tsig_result {
-        let s = serde_json::to_string(&tr.body).unwrap_or_else(|_| req_body_str.clone());
-        let l = s.len();
-        (s, l)
-    } else {
-        (req_body_str.clone(), body.len())
-    };
-
     let backend = match resolve_backend(
         &state.app_state,
         model.as_deref(),
-        Some(&routing_body_str),
-        routing_body_len,
+        Some(&req_body_str),
+        body.len(),
     )
     .await
     {
@@ -279,32 +304,15 @@ pub async fn handle_chat_completions(
         }
     };
 
-    let is_gemini = backend.backend_type == BackendType::Gemini;
-
-    // --- TSIG: for Gemini backends, write extracted signatures back ---
-    let body = if let Some(tr) = tsig_result {
-        let mut val = tr.body;
-        if is_gemini {
-            tsig::inject_tsig_to_gemini_request(&mut val, &tr.sigs);
-            tracing::trace!(
-                injected_messages = tr.sigs.len(),
-                "tsig: wrote thought_signature back into request for gemini"
-            );
-        }
-        if let Some(ref override_model) = backend.model {
-            val["model"] = serde_json::Value::String(override_model.clone());
-        }
-        bytes::Bytes::from(serde_json::to_vec(&val).unwrap_or_else(|_| body.to_vec()))
-    } else if let Some(ref override_model) = backend.model {
-        match serde_json::from_slice::<serde_json::Value>(&body) {
-            Ok(mut v) => {
+    // Optional model override (Gemini thought_signature inject/strip is inside GeminiProvider).
+    let body = match serde_json::from_slice::<serde_json::Value>(&body) {
+        Ok(mut v) => {
+            if let Some(ref override_model) = backend.model {
                 v["model"] = serde_json::Value::String(override_model.clone());
-                bytes::Bytes::from(serde_json::to_vec(&v).unwrap_or_else(|_| body.to_vec()))
             }
-            Err(_) => body,
+            bytes::Bytes::from(serde_json::to_vec(&v).unwrap_or_else(|_| body.to_vec()))
         }
-    } else {
-        body
+        Err(_) => body,
     };
 
     tracing::info!(
@@ -317,7 +325,7 @@ pub async fn handle_chat_completions(
     let backend_id = backend.id.clone();
     let backend_name = backend.name.clone();
     let actual_model = backend.model.clone().or_else(|| model.clone());
-    let provider = match create_provider(backend) {
+    let provider = match state.provider_pool.get_or_create(backend) {
         Ok(p) => p,
         Err(_) => {
             return (
@@ -351,20 +359,7 @@ pub async fn handle_chat_completions(
             tracing::info!(backend = %backend_name, status = 200, stream = false, "backend responded");
             tracing::trace!(backend = %backend_name, body = %String::from_utf8_lossy(&resp_bytes), "raw response body");
             let status = StatusCode::OK;
-            // --- TSIG response encode (non-streaming) ---
-            let final_bytes = if is_gemini {
-                let maybe = tsig::inject_tsig_response_body(&resp_bytes);
-                if let Some(ref b) = maybe {
-                    tracing::trace!(
-                        before_len = resp_bytes.len(),
-                        after_len = b.len(),
-                        "tsig: injected markers into non-streaming response body"
-                    );
-                }
-                maybe.unwrap_or(resp_bytes)
-            } else {
-                resp_bytes
-            };
+            let final_bytes = resp_bytes;
             let resp_str = String::from_utf8_lossy(&final_bytes).to_string();
             let resp_hdrs = response_headers_json("application/json");
             let (pt, ct, tt) = extract_usage(&resp_str);
@@ -387,115 +382,24 @@ pub async fn handle_chat_completions(
             let notify_tx = state.notify_tx.clone();
             let resp_hdrs = response_headers_json("text/event-stream");
 
-            // --- TSIG response encode (streaming): for Gemini, transform
-            //     each SSE chunk to inject <<TSIG:…>> markers into content
-            //     deltas and strip the raw thought_signature fields. ---
             let recording_stream = unfold(
-                (
-                    s,
-                    Vec::<u8>::new(),
-                    store,
-                    record_id,
-                    resp_hdrs,
-                    notify_tx,
-                    is_gemini,
-                    Vec::<u8>::new(),
-                    false, // pending_flushed_to_client
-                ),
+                (s, Vec::<u8>::new(), store, record_id, resp_hdrs, notify_tx),
                 |state| async move {
-                    let (
-                        mut inner,
-                        mut buf,
-                        store,
-                        rid,
-                        hdrs,
-                        tx,
-                        is_gemini,
-                        mut pending,
-                        mut pending_flushed_to_client,
-                    ) = state;
+                    let (mut inner, mut buf, store, rid, hdrs, tx) = state;
                     match inner.next().await {
                         Some(Ok(chunk)) => {
                             tracing::trace!(chunk = %String::from_utf8_lossy(&chunk), "raw stream chunk");
-                            let output = if is_gemini {
-                                let transformed = tsig::transform_sse_chunk(&chunk, &mut pending);
-                                if transformed.is_empty() && !pending.is_empty() {
-                                    tracing::trace!(
-                                        chunk_len = chunk.len(),
-                                        pending_len = pending.len(),
-                                        "tsig: buffered partial sse data (waiting for newline)"
-                                    );
-                                } else if !transformed.is_empty()
-                                    && transformed.as_ref() != chunk.as_ref()
-                                {
-                                    tracing::trace!(
-                                        before_len = chunk.len(),
-                                        after_len = transformed.len(),
-                                        pending_len = pending.len(),
-                                        "tsig: transformed sse chunk"
-                                    );
-                                }
-                                buf.extend_from_slice(&transformed);
-                                transformed
-                            } else {
-                                buf.extend_from_slice(&chunk);
-                                chunk
-                            };
+                            buf.extend_from_slice(&chunk);
                             Some((
-                                Ok::<_, io::Error>(Frame::data(output)),
-                                (
-                                    inner,
-                                    buf,
-                                    store,
-                                    rid,
-                                    hdrs,
-                                    tx,
-                                    is_gemini,
-                                    pending,
-                                    pending_flushed_to_client,
-                                ),
+                                Ok::<_, io::Error>(Frame::data(chunk)),
+                                (inner, buf, store, rid, hdrs, tx),
                             ))
                         }
                         Some(Err(e)) => Some((
                             Err(io::Error::new(io::ErrorKind::Other, e)),
-                            (
-                                inner,
-                                buf,
-                                store,
-                                rid,
-                                hdrs,
-                                tx,
-                                is_gemini,
-                                pending,
-                                pending_flushed_to_client,
-                            ),
+                            (inner, buf, store, rid, hdrs, tx),
                         )),
                         None => {
-                            // If we buffered partial lines (no newline boundaries), flush them once
-                            // to the client before terminating the stream.
-                            if is_gemini && !pending.is_empty() && !pending_flushed_to_client {
-                                let flushed = tsig::transform_sse_chunk(b"", &mut pending);
-                                pending_flushed_to_client = true;
-                                tracing::trace!(
-                                    flushed_len = flushed.len(),
-                                    "tsig: flushed pending sse buffer at stream end"
-                                );
-                                buf.extend_from_slice(&flushed);
-                                return Some((
-                                    Ok::<_, io::Error>(Frame::data(flushed)),
-                                    (
-                                        inner,
-                                        buf,
-                                        store,
-                                        rid,
-                                        hdrs,
-                                        tx,
-                                        is_gemini,
-                                        pending,
-                                        pending_flushed_to_client,
-                                    ),
-                                ));
-                            }
                             let raw = String::from_utf8_lossy(&buf).to_string();
                             let body = reconstruct_from_sse(&raw);
                             let (pt, ct, tt) = extract_usage(&body);
@@ -579,7 +483,7 @@ pub async fn handle_models(
 
     let backend_id = backend.id.clone();
     let backend_name = backend.name.clone();
-    let provider = match create_provider(backend) {
+    let provider = match state.provider_pool.get_or_create(backend) {
         Ok(p) => p,
         Err(_) => {
             return (
@@ -642,5 +546,41 @@ pub async fn handle_models(
                 serde_json::json!({ "error": { "message": msg, "type": "gateway_error" } });
             (code, [("Content-Type", "application/json")], err_json.to_string()).into_response()
         }
+    }
+}
+
+#[cfg(test)]
+mod reconstruct_tests {
+    use super::*;
+
+    #[test]
+    fn reconstruct_merges_streaming_tool_calls() {
+        let raw = concat!(
+            "data: {\"choices\":[{\"delta\":{\"role\":\"assistant\",\"tool_calls\":",
+            "[{\"index\":0,\"id\":\"c1\",\"type\":\"function\",\"function\":",
+            "{\"name\":\"f\",\"arguments\":\"\"}}]}}]}\n",
+            "data: {\"choices\":[{\"delta\":{\"tool_calls\":",
+            "[{\"index\":0,\"function\":{\"arguments\":\"{\\\"x\\\":1}\"}}]}}]}\n",
+        );
+        let s = reconstruct_from_sse(raw);
+        let v: serde_json::Value = serde_json::from_str(&s).unwrap();
+        let tc = &v["choices"][0]["message"]["tool_calls"][0];
+        assert_eq!(tc["id"], "c1");
+        assert_eq!(tc["function"]["name"], "f");
+        assert_eq!(tc["function"]["arguments"].as_str().unwrap(), "{\"x\":1}");
+        assert!(tc.get("index").is_none());
+    }
+
+    #[test]
+    fn reconstruct_tool_calls_only_uses_null_content() {
+        let raw = concat!(
+            "data: {\"choices\":[{\"delta\":{\"tool_calls\":",
+            "[{\"index\":0,\"id\":\"c1\",\"type\":\"function\",\"function\":",
+            "{\"name\":\"g\",\"arguments\":\"{}\"}}]}}]}\n",
+        );
+        let s = reconstruct_from_sse(raw);
+        let v: serde_json::Value = serde_json::from_str(&s).unwrap();
+        assert!(v["choices"][0]["message"]["content"].is_null());
+        assert!(v["choices"][0]["message"]["tool_calls"].is_array());
     }
 }

@@ -4,7 +4,7 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use pomfret::config::{AppState, BackendConfig, BackendType, Config};
 use pomfret::store::MemoryStore;
-use pomfret::web::{router, NotifyEvent, WebState};
+use pomfret::web::{router, NotifyEvent, ProviderPool, WebState};
 use std::path::PathBuf;
 use tokio::sync::broadcast;
 use tower::ServiceExt;
@@ -17,6 +17,7 @@ fn test_web_state(app_state: AppState, store: MemoryStore) -> WebState {
         backends_path: PathBuf::from("/tmp/pomfret-test-backends.conf"),
         routing_path: PathBuf::from("/tmp/pomfret-test-routing.conf"),
         notify_tx,
+        provider_pool: ProviderPool::new(),
     }
 }
 use wiremock::matchers::{method, path};

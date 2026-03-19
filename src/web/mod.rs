@@ -1,8 +1,10 @@
 //! Web console: static assets and API routes.
 
 mod api;
+mod provider_pool;
 
 pub use api::NotifyEvent;
+pub use provider_pool::ProviderPool;
 
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
@@ -25,6 +27,8 @@ pub struct WebState {
     pub routing_path: std::path::PathBuf,
     /// Sender for long-poll notifications (requests/backends changed).
     pub notify_tx: broadcast::Sender<NotifyEvent>,
+    /// Lazy per-backend LLM provider instances; cleared when backends are edited via API.
+    pub provider_pool: ProviderPool,
 }
 
 pub fn router(state: WebState) -> Router {
