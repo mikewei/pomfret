@@ -1,6 +1,6 @@
 [package]
 name = "pomfret"
-version = "0.1.1"
+version = "0.2.0"
 edition = "2021"
 description = "Pomfret: Proxy Of Models For Routing, Evaluation & Telemetry — OpenAI-compatible API, backend routing, and web console"
 license = "MIT"
