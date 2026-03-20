@@ -27,7 +27,7 @@
 
 使用多个 LLM 提供商不应该是一件痛苦的事。无论你是在评估模型、使用 [OpenClaw](https://github.com/ArcadeAI/OpenClaw) 构建 Agent，还是只想在不修改应用代码的情况下切换后端，**Pomfret** 都能充当你的客户端和 LLM 后端之间的桥梁，提供一个统一的 OpenAI 兼容端点。
 
-- **一个端点，多个后端** — 将应用指向 Pomfret，即可在 OpenAI、Ollama 或任何 OpenAI 兼容服务之间秒级切换。
+- **一个端点，多个后端** — 将应用指向 Pomfret，即可在 OpenAI、Google Gemini、Ollama 或任何 OpenAI 兼容服务之间秒级切换。
 - **智能路由** — 按模型名称、Prompt 长度或正则匹配路由请求。支持轮询负载均衡或锁定到特定后端。
 - **全面可观测** — 内置 Web 控制台，可检查每一个请求和响应，轻松浏览 JSON 请求体和 Prompt 内容，追踪 Token 用量，实时监控后端健康状态。
 - **零运行时依赖** — 编译为单一静态二进制文件，Web 控制台内嵌其中。无需 Node.js、Docker 或数据库。
@@ -37,7 +37,7 @@
 | 类别 | 详情 |
 |---|---|
 | **OpenAI 兼容 API** | `POST /v1/chat/completions`（流式和非流式）、`GET /v1/models` |
-| **后端支持** | Ollama、OpenAI 及任何 OpenAI 兼容的提供商（Azure OpenAI、Groq、Together AI 等） |
+| **后端支持** | Ollama、OpenAI、Google Gemini 及任何 OpenAI 兼容的提供商（Azure OpenAI、Groq、Together AI 等） |
 | **条件路由** | 基于规则的路由：按模型名称、请求体长度或 Prompt 内容的正则匹配 |
 | **路由策略** | 首个可用、轮询，或锁定到特定后端 |
 | **Web 控制台** | 配置管理、实时图表仪表盘、请求检查 — 一站式搞定 |
@@ -132,6 +132,27 @@ Pomfret 可通过命令行参数或 TOML 配置文件（默认 `~/.pomfret/backe
 | `--bind` | `-b` | 监听地址 | `127.0.0.1` |
 
 所有后端和路由配置均可直接在 **Web 控制台** 中管理 — 添加、编辑或删除 LLM 后端，设置基于条件的路由规则（按模型名称、Prompt 长度或正则表达式），全部无需重启服务。
+
+### 网络代理
+
+访问上游 LLM 的出站请求使用 [reqwest](https://github.com/seanmonstar/reqwest)，会遵循常见的代理环境变量（与 curl 类似）。常用变量如下：
+
+| 变量 | 作用 |
+|---|---|
+| `https_proxy` / `HTTPS_PROXY` | HTTPS 代理，适用于多数云端 HTTPS API |
+| `http_proxy` / `HTTP_PROXY` | HTTP 代理 |
+| `all_proxy` / `ALL_PROXY` | 同时作用于 HTTP 与 HTTPS |
+| `no_proxy` / `NO_PROXY` | 逗号分隔的主机或网段，**不走代理**（例如本地 Ollama） |
+
+示例：API 流量走本机代理，本地 Ollama 直连。下面为 **Linux / macOS** 下的 shell 写法（`export`）；在 Windows 上请用命令提示符的 `set` 或 PowerShell 的 `$env:...` 设置同名环境变量。
+
+```bash
+export https_proxy=http://127.0.0.1:7890
+export no_proxy=127.0.0.1,localhost,.local
+pomfret
+```
+
+不需要代理时，不设置或取消这些环境变量即可。
 
 ## 技术栈
 

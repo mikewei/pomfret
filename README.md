@@ -27,7 +27,7 @@
 
 Working with multiple LLM providers shouldn't be painful. Whether you're evaluating models, building agents with [OpenClaw](https://github.com/ArcadeAI/OpenClaw), or just want to swap backends without touching your application code, **Pomfret** sits between your client and the LLM backends, giving you a single, unified OpenAI-compatible endpoint.
 
-- **One endpoint, many backends** — point your app at Pomfret and switch between OpenAI, Ollama, or any OpenAI-compatible service in seconds.
+- **One endpoint, many backends** — point your app at Pomfret and switch between OpenAI, Google Gemini, Ollama, or any OpenAI-compatible service in seconds.
 - **Smart routing** — route requests by model name, prompt length, or regex patterns. Load-balance with round-robin or pin to a specific backend.
 - **Full observability** — a built-in web console lets you inspect every request and response, easily browse JSON payloads and prompts, track token usage, and monitor backend health — all in real time.
 - **Zero dependencies at runtime** — ships as a single static binary with the web console embedded. No Node.js, no Docker, no database required.
@@ -37,7 +37,7 @@ Working with multiple LLM providers shouldn't be painful. Whether you're evaluat
 | Category | Details |
 |---|---|
 | **OpenAI-Compatible API** | `POST /v1/chat/completions` (streaming & non-streaming), `GET /v1/models` |
-| **Backend Support** | Ollama, OpenAI, and any OpenAI-compatible provider (Azure OpenAI, Groq, Together AI, etc.) |
+| **Backend Support** | Ollama, OpenAI, Google Gemini, and any OpenAI-compatible provider (Azure OpenAI, Groq, Together AI, etc.) |
 | **Conditional Routing** | Rule-based routing by model name, request body length, or regex match on prompt content |
 | **Routing Strategies** | First available, round-robin, or pinned to a specific backend |
 | **Web Console** | Configuration, dashboard with live charts, and request inspection — all in one place |
@@ -132,6 +132,27 @@ Pomfret can be configured via CLI flags or a TOML config file (`~/.pomfret/backe
 | `--bind` | `-b` | Bind address | `127.0.0.1` |
 
 All backend and routing configuration can be managed directly from the **web console** — add, edit, or remove LLM backends, and set up condition-based routing rules (by model name, prompt length, or regex), all without restarting the service.
+
+### Network proxy
+
+Outbound requests to LLM backends use [reqwest](https://github.com/seanmonstar/reqwest), which respects the usual proxy environment variables (same conventions as curl). Typical variables:
+
+| Variable | Purpose |
+|---|---|
+| `https_proxy` / `HTTPS_PROXY` | HTTPS proxy for TLS upstreams (most cloud APIs) |
+| `http_proxy` / `HTTP_PROXY` | HTTP proxy for plain HTTP |
+| `all_proxy` / `ALL_PROXY` | Proxy for both HTTP and HTTPS |
+| `no_proxy` / `NO_PROXY` | Comma-separated hosts or CIDRs to **bypass** the proxy (e.g. local Ollama) |
+
+Example — route API traffic through a local proxy, but talk to Ollama directly. The snippet below uses **Linux / macOS** shell syntax (`export`). On Windows, set the same variable names with Command Prompt (`set HTTPS_PROXY=...`) or PowerShell (`$env:HTTPS_PROXY = "..."`).
+
+```bash
+export https_proxy=http://127.0.0.1:7890
+export no_proxy=127.0.0.1,localhost,.local
+pomfret
+```
+
+Unset or omit these variables if you do not need a proxy.
 
 ## Tech Stack
 
