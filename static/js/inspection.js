@@ -13,6 +13,7 @@
   var detailRequestEl = null;
   var detailResponseEl = null;
   var selectedId = null;
+  var activeDetailTab = 'request';
   var requestsCache = [];
   var backendsMap = {};
 
@@ -374,13 +375,18 @@
     detailSummaryEl.innerHTML = html;
   }
 
-  function showDetail(id) {
+  function showDetail(id, options) {
+    options = options || {};
+    var shouldScroll = options.skipAutoScroll !== true;
+    var shouldResetTab = options.resetTab !== false;
+    var shouldSyncActiveTab = options.syncActiveTab !== false;
+
     selectedId = id;
     listEl.querySelectorAll('.insp-row-selected').forEach(function (r) { r.classList.remove('insp-row-selected'); });
     var row = listEl.querySelector('tr[data-id="' + escapeCssAttr(id) + '"]');
     if (row) {
       row.classList.add('insp-row-selected');
-      row.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      if (shouldScroll) row.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
     }
 
     detailPanelEl.hidden = false;
@@ -399,10 +405,14 @@
         renderDetailSummary(data);
         renderBody(detailRequestEl, data.request_body, t('none'));
         renderBody(detailResponseEl, data.response_body, t('none'));
-        detailTabsEl.querySelector('.insp-tab.active') && detailTabsEl.querySelector('.insp-tab.active').classList.remove('active');
-        detailTabsEl.querySelector('[data-panel="request"]').classList.add('active');
-        detailRequestEl.closest('.insp-detail-panel').classList.remove('insp-panel-hidden');
-        detailResponseEl.closest('.insp-detail-panel').classList.add('insp-panel-hidden');
+        if (shouldResetTab) {
+          switchDetailTab('request');
+        } else {
+          switchDetailTab(activeDetailTab === 'response' ? 'response' : 'request');
+        }
+        if (shouldSyncActiveTab) {
+          activeDetailTab = detailResponseEl.closest('.insp-detail-panel').classList.contains('insp-panel-hidden') ? 'request' : 'response';
+        }
       })
       .catch(function () {
         detailRequestEl.innerHTML = '<p class="insp-error">' + escapeHtml(t('loadFailed')) + '</p>';
@@ -411,15 +421,26 @@
   }
 
   function switchDetailTab(panelName) {
+    activeDetailTab = panelName === 'response' ? 'response' : 'request';
     detailTabsEl.querySelectorAll('.insp-tab').forEach(function (tab) {
-      tab.classList.toggle('active', tab.getAttribute('data-panel') === panelName);
+      tab.classList.toggle('active', tab.getAttribute('data-panel') === activeDetailTab);
     });
-    detailRequestEl.closest('.insp-detail-panel').classList.toggle('insp-panel-hidden', panelName !== 'request');
-    detailResponseEl.closest('.insp-detail-panel').classList.toggle('insp-panel-hidden', panelName !== 'response');
+    detailRequestEl.closest('.insp-detail-panel').classList.toggle('insp-panel-hidden', activeDetailTab !== 'request');
+    detailResponseEl.closest('.insp-detail-panel').classList.toggle('insp-panel-hidden', activeDetailTab !== 'response');
+  }
+
+  function getRequestStatusById(list, id) {
+    if (!id || !list || !list.length) return undefined;
+    var item = list.find(function (r) { return r.id === id; });
+    return item ? item.status : undefined;
   }
 
   function renderList(requests) {
-    requestsCache = requests || [];
+    var prevRequests = requestsCache || [];
+    var nextRequests = requests || [];
+    var prevSelectedStatus = getRequestStatusById(prevRequests, selectedId);
+    var nextSelectedStatus = getRequestStatusById(nextRequests, selectedId);
+    requestsCache = nextRequests;
     if (!listEl) return;
     if (!requests || requests.length === 0) {
       listEl.innerHTML = '<tr><td colspan="6">' + escapeHtml(t('noRequests')) + '</td></tr>';
@@ -463,6 +484,11 @@
       var row = listEl.querySelector('tr[data-id="' + escapeCssAttr(selectedId) + '"]');
       if (row) row.classList.add('insp-row-selected');
       detailPanelEl.hidden = false;
+
+      // Refresh response body only when the selected record status changes on list update.
+      if (activeDetailTab === 'response' && prevSelectedStatus !== undefined && nextSelectedStatus !== undefined && prevSelectedStatus !== nextSelectedStatus) {
+        refreshDetail();
+      }
     }
   }
 
@@ -506,7 +532,7 @@
   }
 
   function refreshDetail() {
-    if (selectedId) showDetail(selectedId);
+    if (selectedId) showDetail(selectedId, { skipAutoScroll: true, resetTab: false, syncActiveTab: false });
   }
 
   global.Inspection = {

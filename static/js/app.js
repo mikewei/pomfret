@@ -1023,7 +1023,6 @@
         if (events.indexOf('requests') !== -1) {
           loadRequests();
           loadTimeseries();
-          if (window.Inspection && window.Inspection.getSelectedId()) window.Inspection.refreshDetail();
         }
         if (events.indexOf('backends') !== -1) loadBackendsAndStatus();
         setTimeout(startNotifyPoll, 0);
