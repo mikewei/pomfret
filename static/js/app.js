@@ -1,5 +1,5 @@
 (function () {
-  var FRONTEND_VERSION = '0.1.0';
+  var FRONTEND_VERSION = window.__POMFRET_FRONTEND_VERSION__ || '0.1.0';
   var t = window.i18n && window.i18n.t ? window.i18n.t : function (k) { return k; };
 
   var _toastTimer;
