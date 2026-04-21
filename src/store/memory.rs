@@ -1,5 +1,6 @@
 //! In-memory store for relayed requests (for console UI).
 
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::sync::Arc;
@@ -137,6 +138,50 @@ impl MemoryStore {
             .collect()
     }
 
+    /// Search `request_body` / `response_body` (case-insensitive substring). Returns newest-first ids, up to `limit`.
+    pub async fn search_request_ids(&self, needle: &str, limit: usize) -> RequestSearchResult {
+        let trimmed = needle.trim();
+        if trimmed.is_empty() {
+            return RequestSearchResult::default();
+        }
+        let limit = limit.max(1);
+        let pattern = format!(r"(?i){}", regex::escape(trimmed));
+        let Ok(re) = Regex::new(&pattern) else {
+            return RequestSearchResult::default();
+        };
+
+        let g = self.inner.read().await;
+        let mut ids = Vec::new();
+        let mut matched_records = 0usize;
+        let mut truncated = false;
+
+        for r in g.records.iter().rev() {
+            let hit = r
+                .request_body
+                .as_ref()
+                .is_some_and(|s| re.is_match(s))
+                || r
+                    .response_body
+                    .as_ref()
+                    .is_some_and(|s| re.is_match(s));
+            if !hit {
+                continue;
+            }
+            matched_records += 1;
+            if ids.len() < limit {
+                ids.push(r.id.clone());
+            } else {
+                truncated = true;
+            }
+        }
+
+        RequestSearchResult {
+            ids,
+            matched_records,
+            truncated,
+        }
+    }
+
     /// Update existing record (e.g. set response).
     pub async fn update_response(
         &self,
@@ -265,6 +310,14 @@ pub struct BackendStats {
     pub prompt_tokens: u64,
     pub completion_tokens: u64,
     pub total_tokens: u64,
+}
+
+/// Result of [`MemoryStore::search_request_ids`].
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct RequestSearchResult {
+    pub ids: Vec<String>,
+    pub matched_records: usize,
+    pub truncated: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]

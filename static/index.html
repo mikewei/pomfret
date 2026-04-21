@@ -203,6 +203,29 @@
       </div>
     </div>
   </div>
+  <aside id="console-dock" class="console-dock" hidden aria-label="Console tools">
+    <div id="dock-search-panel" class="console-dock-panel" hidden>
+      <div class="console-dock-panel-head">
+        <span class="console-dock-panel-title" data-i18n="dockSearchTitle">Search</span>
+        <button type="button" id="dock-panel-close" class="console-dock-panel-close" aria-label="Close">×</button>
+      </div>
+      <input type="search" id="dock-search-input" class="console-dock-input" data-i18n="dockSearchPlaceholder" data-i18n-placeholder="true" placeholder="Keyword" autocomplete="off" />
+      <div class="console-dock-panel-actions">
+        <button type="button" id="dock-search-run" class="console-dock-icon-btn" aria-label="Run search">▶</button>
+        <button type="button" id="dock-search-clear" class="console-dock-icon-btn console-dock-icon-btn-muted" aria-label="Clear">⌫</button>
+      </div>
+      <div id="dock-search-stats" class="console-dock-stats" aria-live="polite"></div>
+      <div class="console-dock-symbol-row" role="toolbar" aria-label="Search navigation">
+        <button type="button" id="dock-prev-record" class="console-dock-sym" title="" aria-label="">&lt;|</button>
+        <button type="button" id="dock-prev-occ" class="console-dock-sym" title="" aria-label="">&lt;</button>
+        <button type="button" id="dock-next-occ" class="console-dock-sym" title="" aria-label="">&gt;</button>
+        <button type="button" id="dock-next-record" class="console-dock-sym" title="" aria-label="">|&gt;</button>
+      </div>
+    </div>
+    <div class="console-dock-rail" role="toolbar" aria-label="Quick tools">
+      <button type="button" id="dock-toolbar-search" class="console-dock-tool" title="Search" aria-label="Search">🔍</button>
+    </div>
+  </aside>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
   <script>
     window.__POMFRET_FRONTEND_VERSION__ = "__POMFRET_CARGO_VERSION__";

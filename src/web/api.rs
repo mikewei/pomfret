@@ -1,12 +1,13 @@
 //! Console API: list requests, get one request, list backends, backend status, config save/export, routing, long-poll notify.
 
 use axum::extract::{Path, Query, State};
-use axum::http::header;
+use axum::http::{header, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, put};
 use axum::{Json, Router};
 use crate::config::{write_config_to_path, BackendConfig, BackendType, Config};
 use crate::routing::{save_routing_config, RoutingConfig};
+use crate::store::RequestSearchResult;
 use crate::web::WebState;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -90,6 +91,7 @@ fn default_notify_timeout() -> u64 {
 pub fn router(state: WebState) -> Router<WebState> {
     Router::new()
         .route("/requests", get(list_requests))
+        .route("/requests/search", get(search_requests))
         .route("/requests/:id", get(get_request))
         .route("/stats", get(stats))
         .route("/stats/timeseries", get(timeseries))
@@ -198,6 +200,36 @@ async fn list_requests(State(state): State<WebState>) -> Json<Vec<RequestListIte
         })
         .collect();
     Json(items)
+}
+
+const MAX_SEARCH_QUERY_LEN: usize = 256;
+
+#[derive(Deserialize)]
+struct RequestSearchQuery {
+    q: String,
+    #[serde(default = "default_search_limit")]
+    limit: usize,
+}
+
+fn default_search_limit() -> usize {
+    200
+}
+
+async fn search_requests(
+    State(state): State<WebState>,
+    Query(q): Query<RequestSearchQuery>,
+) -> impl IntoResponse {
+    let trimmed = q.q.trim();
+    if trimmed.len() > MAX_SEARCH_QUERY_LEN {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": "query too long" })),
+        )
+            .into_response();
+    }
+    let limit = q.limit.clamp(1, 500);
+    let res: RequestSearchResult = state.store.search_request_ids(trimmed, limit).await;
+    Json(res).into_response()
 }
 
 async fn get_request(

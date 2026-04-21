@@ -617,6 +617,16 @@
       panel.classList.toggle('active', isActive);
       panel.hidden = !isActive;
     });
+    var consoleDockEl = document.getElementById('console-dock');
+    if (consoleDockEl) {
+      var isInspection = tabName === 'inspection';
+      consoleDockEl.hidden = !isInspection;
+      if (!isInspection) {
+        document.body.classList.remove('dock-panel-open');
+        var dockPanel = document.getElementById('dock-search-panel');
+        if (dockPanel) dockPanel.hidden = true;
+      }
+    }
   }
 
   tabButtons.forEach(function (btn) {
