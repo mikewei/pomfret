@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [unreleased]
+
+### 🚀 Features
+
+- Search in inspection records
+
 ## [0.2.1] - 2026-03-27
 
 ### 🐛 Bug Fixes
