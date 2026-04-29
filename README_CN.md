@@ -130,6 +130,9 @@ Pomfret 可通过命令行参数或 TOML 配置文件（默认 `~/.pomfret/backe
 | `--config` | `-c` | 后端配置文件路径 | `~/.pomfret/backends.conf` |
 | `--port` | `-p` | 监听端口 | `8080` |
 | `--bind` | `-b` | 监听地址 | `127.0.0.1` |
+| `--backend-timeout-secs` | 无 | 访问每个后端的出站 HTTP 请求超时（秒） | `300` |
+
+当 Pomfret 自身无法完成上游请求（例如 `reqwest` 触发配置的超时并返回 HTTP **504 Gateway Timeout**，或其它传输类错误映射为 **502**）时，错误 JSON 仍为 `type: "gateway_error"`，并在 `error.message` 末尾追加 **`(pomfret)`**。来自上游的 HTTP 错误会原样透传，因此上游返回的 **504** 响应体不会自动带上该后缀（除非上游原文本就包含）。
 
 所有后端和路由配置均可直接在 **Web 控制台** 中管理 — 添加、编辑或删除 LLM 后端，设置基于条件的路由规则（按模型名称、Prompt 长度或正则表达式），全部无需重启服务。
 

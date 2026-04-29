@@ -43,7 +43,13 @@ async fn update_response() {
     let id = r.id.clone();
     store.push(r).await;
     store
-        .update_response(&id, Some("{\"choices\":[]}".to_string()), Some(200), None)
+        .update_response(
+            &id,
+            Some("{\"choices\":[]}".to_string()),
+            Some(200),
+            None,
+            None,
+        )
         .await;
     let got = store.get(&id).await.unwrap();
     assert_eq!(got.response_body.as_deref(), Some("{\"choices\":[]}"));

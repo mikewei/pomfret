@@ -27,6 +27,8 @@ pub struct RequestRecord {
     pub response_body: Option<String>,
     pub status: Option<u16>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub status_label: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub response_headers: Option<String>,
     pub created_at: f64,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -62,6 +64,7 @@ impl RequestRecord {
             request_body,
             response_body: None,
             status: None,
+            status_label: None,
             response_headers: None,
             created_at: now_secs(),
             prompt_tokens: None,
@@ -74,10 +77,12 @@ impl RequestRecord {
         &mut self,
         body: Option<String>,
         status: Option<u16>,
+        status_label: Option<String>,
         response_headers: Option<String>,
     ) {
         self.response_body = body;
         self.status = status;
+        self.status_label = status_label;
         self.response_headers = response_headers;
     }
 }
@@ -188,11 +193,12 @@ impl MemoryStore {
         id: &str,
         response_body: Option<String>,
         status: Option<u16>,
+        status_label: Option<String>,
         response_headers: Option<String>,
     ) {
         let mut g = self.inner.write().await;
         if let Some(r) = g.records.iter_mut().find(|r| r.id == id) {
-            r.set_response(response_body, status, response_headers);
+            r.set_response(response_body, status, status_label, response_headers);
         }
     }
 

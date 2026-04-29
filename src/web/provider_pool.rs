@@ -36,13 +36,14 @@ impl ProviderPool {
     pub fn get_or_create(
         &self,
         config: BackendConfig,
+        backend_timeout_secs: u64,
     ) -> Result<Arc<dyn LlmProvider>, Box<dyn std::error::Error + Send + Sync>> {
         let id = config.id.clone();
         let mut g = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(p) = g.get(&id) {
             return Ok(Arc::clone(p));
         }
-        let boxed = create_provider(config)?;
+        let boxed = create_provider(config, backend_timeout_secs)?;
         let arc: Arc<dyn LlmProvider> = Arc::from(boxed);
         g.insert(id, Arc::clone(&arc));
         Ok(arc)

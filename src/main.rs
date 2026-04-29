@@ -25,6 +25,10 @@ struct Cli {
     /// Bind address (default: 127.0.0.1)
     #[arg(long, short = 'b')]
     bind: Option<String>,
+
+    /// Timeout in seconds for outbound HTTP requests to each backend (default: 300)
+    #[arg(long, default_value_t = 300)]
+    backend_timeout_secs: u64,
 }
 
 #[tokio::main]
@@ -73,6 +77,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         routing_path,
         notify_tx,
         provider_pool: ProviderPool::new(),
+        backend_timeout_secs: cli.backend_timeout_secs,
     };
 
     let app = router(web_state);

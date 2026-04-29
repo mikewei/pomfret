@@ -20,6 +20,7 @@ fn test_web_state(app_state: AppState, store: MemoryStore) -> WebState {
         routing_path: PathBuf::from("/tmp/pomfret-tsig-test-routing.conf"),
         notify_tx,
         provider_pool: ProviderPool::new(),
+        backend_timeout_secs: 300,
     }
 }
 

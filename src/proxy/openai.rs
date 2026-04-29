@@ -15,6 +15,46 @@ use std::collections::{BTreeMap, HashMap};
 use std::io;
 use tokio_stream::StreamExt;
 
+/// Suffix appended to Pomfret-synthesized gateway error messages (not used for upstream passthrough bodies).
+fn pomfret_gateway_message(base: impl Into<String>) -> String {
+    let s = base.into();
+    let t = s.trim_end();
+    if t.ends_with("(pomfret)") {
+        t.to_string()
+    } else {
+        format!("{t} (pomfret)")
+    }
+}
+
+fn map_reqwest_error(re: &reqwest::Error) -> (StatusCode, String) {
+    let code = if re.is_timeout() {
+        StatusCode::GATEWAY_TIMEOUT
+    } else {
+        StatusCode::BAD_GATEWAY
+    };
+    (code, pomfret_gateway_message(re.to_string()))
+}
+
+fn map_stream_io_error(e: &io::Error) -> (StatusCode, String) {
+    if let Some(re) = e
+        .get_ref()
+        .and_then(|r| r.downcast_ref::<reqwest::Error>())
+    {
+        return map_reqwest_error(re);
+    }
+    (
+        StatusCode::BAD_GATEWAY,
+        pomfret_gateway_message(e.to_string()),
+    )
+}
+
+fn map_provider_upstream_error(e: &ProviderError) -> (StatusCode, String) {
+    match e {
+        ProviderError::Status(status, body) => (*status, body.clone()),
+        ProviderError::Request(re) => map_reqwest_error(re),
+    }
+}
+
 /// Minimal request shape to read stream and model for logging.
 #[derive(serde::Deserialize, Default)]
 struct ChatRequestMin {
@@ -325,7 +365,10 @@ pub async fn handle_chat_completions(
     let backend_id = backend.id.clone();
     let backend_name = backend.name.clone();
     let actual_model = backend.model.clone().or_else(|| model.clone());
-    let provider = match state.provider_pool.get_or_create(backend) {
+    let provider = match state
+        .provider_pool
+        .get_or_create(backend, state.backend_timeout_secs)
+    {
         Ok(p) => p,
         Err(_) => {
             return (
@@ -365,7 +408,13 @@ pub async fn handle_chat_completions(
             let (pt, ct, tt) = extract_usage(&resp_str);
             state
                 .store
-                .update_response(&record_id, Some(resp_str), Some(status.as_u16()), Some(resp_hdrs))
+                .update_response(
+                    &record_id,
+                    Some(resp_str),
+                    Some(status.as_u16()),
+                    None,
+                    Some(resp_hdrs),
+                )
                 .await;
             state.store.update_tokens(&record_id, pt, ct, tt).await;
             let _ = state.notify_tx.send(NotifyEvent::Requests);
@@ -381,24 +430,56 @@ pub async fn handle_chat_completions(
             let store = state.store.clone();
             let notify_tx = state.notify_tx.clone();
             let resp_hdrs = response_headers_json("text/event-stream");
+            // Mark stream as started so UI can show a concrete status before stream end.
+            store
+                .update_response(
+                    &record_id,
+                    Some("streaming...".to_string()),
+                    Some(200),
+                    Some("200⏳".to_string()),
+                    Some(resp_hdrs.clone()),
+                )
+                .await;
+            let _ = notify_tx.send(NotifyEvent::Requests);
 
             let recording_stream = unfold(
-                (s, Vec::<u8>::new(), store, record_id, resp_hdrs, notify_tx),
+                (s, Vec::<u8>::new(), store, record_id, resp_hdrs, notify_tx, false),
                 |state| async move {
-                    let (mut inner, mut buf, store, rid, hdrs, tx) = state;
+                    let (mut inner, mut buf, store, rid, hdrs, tx, stream_failed) = state;
+                    if stream_failed {
+                        return None;
+                    }
                     match inner.next().await {
                         Some(Ok(chunk)) => {
                             tracing::trace!(chunk = %String::from_utf8_lossy(&chunk), "raw stream chunk");
                             buf.extend_from_slice(&chunk);
                             Some((
                                 Ok::<_, io::Error>(Frame::data(chunk)),
-                                (inner, buf, store, rid, hdrs, tx),
+                                (inner, buf, store, rid, hdrs, tx, false),
                             ))
                         }
-                        Some(Err(e)) => Some((
-                            Err(io::Error::new(io::ErrorKind::Other, e)),
-                            (inner, buf, store, rid, hdrs, tx),
-                        )),
+                        Some(Err(e)) => {
+                            let (code, msg) = map_stream_io_error(&e);
+                            let err_json = serde_json::json!({
+                                "error": { "message": msg, "type": "gateway_error" }
+                            });
+                            let err_str = err_json.to_string();
+                            let hdrs_err = response_headers_json("application/json");
+                            store
+                                .update_response(
+                                    &rid,
+                                    Some(err_str),
+                                    Some(code.as_u16()),
+                                    None,
+                                    Some(hdrs_err),
+                                )
+                                .await;
+                            let _ = tx.send(NotifyEvent::Requests);
+                            Some((
+                                Err(io::Error::new(io::ErrorKind::Other, e)),
+                                (inner, buf, store, rid, hdrs, tx, true),
+                            ))
+                        }
                         None => {
                             let raw = String::from_utf8_lossy(&buf).to_string();
                             let body = reconstruct_from_sse(&raw);
@@ -408,6 +489,7 @@ pub async fn handle_chat_completions(
                                     &rid,
                                     Some(body),
                                     Some(200),
+                                    None,
                                     Some(hdrs),
                                 )
                                 .await;
@@ -428,30 +510,29 @@ pub async fn handle_chat_completions(
                 .into_response()
         }
         Err(e) => {
-            let (code, msg) = match &e {
-                ProviderError::Status(status, body) => (*status, body.clone()),
-                _ => (StatusCode::BAD_GATEWAY, e.to_string()),
-            };
+            let (code, msg) = map_provider_upstream_error(&e);
             tracing::info!(backend = %backend_name, status = %code, "backend error");
             tracing::trace!(backend = %backend_name, status = %code, body = %msg, "raw error response body");
             let resp_hdrs = response_headers_json("application/json");
+            let err_json = serde_json::json!({
+                "error": { "message": msg, "type": "gateway_error" }
+            });
+            let err_str = err_json.to_string();
             state
                 .store
                 .update_response(
                     &record_id,
-                    Some(msg.clone()),
+                    Some(err_str.clone()),
                     Some(code.as_u16()),
+                    None,
                     Some(resp_hdrs),
                 )
                 .await;
             let _ = state.notify_tx.send(NotifyEvent::Requests);
-            let err_json = serde_json::json!({
-                "error": { "message": msg, "type": "gateway_error" }
-            });
             (
                 code,
                 [("Content-Type", "application/json")],
-                err_json.to_string(),
+                err_str,
             )
                 .into_response()
         }
@@ -483,7 +564,10 @@ pub async fn handle_models(
 
     let backend_id = backend.id.clone();
     let backend_name = backend.name.clone();
-    let provider = match state.provider_pool.get_or_create(backend) {
+    let provider = match state
+        .provider_pool
+        .get_or_create(backend, state.backend_timeout_secs)
+    {
         Ok(p) => p,
         Err(_) => {
             return (
@@ -520,7 +604,13 @@ pub async fn handle_models(
             let resp_str = String::from_utf8_lossy(&bytes).to_string();
             state
                 .store
-                .update_response(&record_id, Some(resp_str), Some(StatusCode::OK.as_u16()), Some(resp_hdrs_ok))
+                .update_response(
+                    &record_id,
+                    Some(resp_str),
+                    Some(StatusCode::OK.as_u16()),
+                    None,
+                    Some(resp_hdrs_ok),
+                )
                 .await;
             let _ = state.notify_tx.send(NotifyEvent::Requests);
             (
@@ -531,20 +621,24 @@ pub async fn handle_models(
                 .into_response()
         }
         Err(e) => {
-            let (code, msg) = match &e {
-                ProviderError::Status(status, body) => (*status, body.clone()),
-                _ => (StatusCode::BAD_GATEWAY, e.to_string()),
-            };
+            let (code, msg) = map_provider_upstream_error(&e);
             tracing::info!(backend = %backend_name, status = %code, "backend models error");
             tracing::trace!(backend = %backend_name, status = %code, body = %msg, "raw models error response body");
-            state
-                .store
-                .update_response(&record_id, Some(msg.clone()), Some(code.as_u16()), Some(resp_hdrs_ok))
-                .await;
-            let _ = state.notify_tx.send(NotifyEvent::Requests);
             let err_json =
                 serde_json::json!({ "error": { "message": msg, "type": "gateway_error" } });
-            (code, [("Content-Type", "application/json")], err_json.to_string()).into_response()
+            let err_str = err_json.to_string();
+            state
+                .store
+                .update_response(
+                    &record_id,
+                    Some(err_str.clone()),
+                    Some(code.as_u16()),
+                    None,
+                    Some(resp_hdrs_ok),
+                )
+                .await;
+            let _ = state.notify_tx.send(NotifyEvent::Requests);
+            (code, [("Content-Type", "application/json")], err_str).into_response()
         }
     }
 }

@@ -14,9 +14,14 @@ pub struct OpenAiCompatProvider {
 }
 
 impl OpenAiCompatProvider {
-    pub fn new(config: BackendConfig) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+    pub fn new(
+        config: BackendConfig,
+        backend_timeout_secs: u64,
+    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         let client = Client::builder()
-            .timeout(std::time::Duration::from_secs(120))
+            .timeout(std::time::Duration::from_secs(
+                backend_timeout_secs.max(1),
+            ))
             .build()?;
         Ok(Self { client, config })
     }

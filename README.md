@@ -130,6 +130,9 @@ Pomfret can be configured via CLI flags or a TOML config file (`~/.pomfret/backe
 | `--config` | `-c` | Path to backends config file | `~/.pomfret/backends.conf` |
 | `--port` | `-p` | Port to listen on | `8080` |
 | `--bind` | `-b` | Bind address | `127.0.0.1` |
+| `--backend-timeout-secs` | _(none)_ | Per-request timeout for outbound HTTP calls to backends | `300` |
+
+When Pomfret itself fails to complete an upstream request (for example `reqwest` hits the configured timeout and returns HTTP **504 Gateway Timeout**, or another transport error mapped to **502**), the JSON error body uses `type: "gateway_error"` and appends **`(pomfret)`** to `error.message`. Upstream HTTP errors are passed through unchanged, so an upstream **504** body will not get that suffix unless the upstream text already contains it.
 
 All backend and routing configuration can be managed directly from the **web console** — add, edit, or remove LLM backends, and set up condition-based routing rules (by model name, prompt length, or regex), all without restarting the service.
 

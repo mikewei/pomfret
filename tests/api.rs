@@ -21,6 +21,7 @@ fn make_state() -> WebState {
         routing_path: PathBuf::from("/tmp/pomfret-test-routing.conf"),
         notify_tx,
         provider_pool: ProviderPool::new(),
+        backend_timeout_secs: 300,
     }
 }
 
@@ -146,6 +147,7 @@ async fn api_requests_search_order_count_truncation() {
             &id3,
             Some(r#"{"msg":"needle"}"#.to_string()),
             Some(200),
+            None,
             None,
         )
         .await;

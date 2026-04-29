@@ -59,12 +59,20 @@ pub trait LlmProvider: Send + Sync {
 /// Create a provider instance from backend configuration.
 pub fn create_provider(
     config: BackendConfig,
+    backend_timeout_secs: u64,
 ) -> Result<Box<dyn LlmProvider>, Box<dyn std::error::Error + Send + Sync>> {
     match config.backend_type {
-        BackendType::OpenAiCompat => {
-            Ok(Box::new(openai_compat::OpenAiCompatProvider::new(config)?))
-        }
-        BackendType::Ollama => Ok(Box::new(ollama::OllamaProvider::new(config)?)),
-        BackendType::Gemini => Ok(Box::new(gemini::GeminiProvider::new(config)?)),
+        BackendType::OpenAiCompat => Ok(Box::new(openai_compat::OpenAiCompatProvider::new(
+            config,
+            backend_timeout_secs,
+        )?)),
+        BackendType::Ollama => Ok(Box::new(ollama::OllamaProvider::new(
+            config,
+            backend_timeout_secs,
+        )?)),
+        BackendType::Gemini => Ok(Box::new(gemini::GeminiProvider::new(
+            config,
+            backend_timeout_secs,
+        )?)),
     }
 }

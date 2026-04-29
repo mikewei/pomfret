@@ -43,10 +43,13 @@ pub struct GeminiProvider {
 }
 
 impl GeminiProvider {
-    pub fn new(mut config: BackendConfig) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+    pub fn new(
+        mut config: BackendConfig,
+        backend_timeout_secs: u64,
+    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         config.base_url = resolve_base_url(&config.base_url);
         Ok(Self {
-            inner: OpenAiCompatProvider::new(config)?,
+            inner: OpenAiCompatProvider::new(config, backend_timeout_secs)?,
             thought_signatures: ThoughtSignatureCache::new(),
         })
     }
@@ -189,7 +192,7 @@ mod tests {
             backend_type: BackendType::Gemini,
             model: None,
         };
-        let p = GeminiProvider::new(config).unwrap();
+        let p = GeminiProvider::new(config, 120).unwrap();
         let body = r#"{"model":"x","store":true,"messages":[]}"#;
         let out = p.prepare_request_body(Bytes::from(body));
         let v: serde_json::Value = serde_json::from_slice(&out).unwrap();

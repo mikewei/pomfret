@@ -717,7 +717,7 @@
     requestRows.push([t('inspRequestBodySize'), reqBodySize === 0 ? '-' : formatByteSize(reqBodySize)]);
 
     var responseRows = [
-      ['Status', data.status != null ? String(data.status) : '-']
+      ['Status', data.status_label || (data.status != null ? String(data.status) : '-')]
     ];
     var respHeaders = parseHeadersJson(data.response_headers);
     respHeaders.forEach(function (p) { responseRows.push([p[0], p[1]]); });
@@ -803,7 +803,8 @@
   function getRequestStatusById(list, id) {
     if (!id || !list || !list.length) return undefined;
     var item = list.find(function (r) { return r.id === id; });
-    return item ? item.status : undefined;
+    if (!item) return undefined;
+    return (item.status != null ? String(item.status) : '-') + '|' + (item.status_label || '');
   }
 
   function renderList(requests) {
@@ -824,7 +825,7 @@
     var rows = requests.slice(0, limit).map(function (r) {
       var time = new Date(r.created_at * 1000).toLocaleString(undefined, { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' });
       var statusClass = r.status >= 200 && r.status < 300 ? 'status-ok' : 'status-fail';
-      var statusText = r.status != null ? r.status : '-';
+      var statusText = r.status_label || (r.status != null ? String(r.status) : '-');
       var selected = r.id === selectedId ? ' insp-row-selected' : '';
       return '<tr class="insp-trace-row' + selected + '" data-id="' + escapeHtml(r.id) + '" role="button" tabindex="0">' +
         '<td class="insp-cell-time">' + escapeHtml(time) + '</td>' +
@@ -857,8 +858,8 @@
       if (row) row.classList.add('insp-row-selected');
       detailPanelEl.hidden = false;
 
-      // Refresh response body only when the selected record status changes on list update.
-      if (activeDetailTab === 'response' && prevSelectedStatus !== undefined && nextSelectedStatus !== undefined && prevSelectedStatus !== nextSelectedStatus) {
+      // Refresh detail whenever selected-record status display changes.
+      if (prevSelectedStatus !== undefined && nextSelectedStatus !== undefined && prevSelectedStatus !== nextSelectedStatus) {
         refreshDetail();
       }
     }

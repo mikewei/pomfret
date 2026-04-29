@@ -17,7 +17,7 @@ async fn chat_completions_non_stream_returns_body() {
         backend_type: BackendType::Ollama,
         model: None,
     };
-    let provider = create_provider(config).unwrap();
+    let provider = create_provider(config, 300).unwrap();
 
     Mock::given(method("POST"))
         .and(path("/v1/chat/completions"))
@@ -48,7 +48,7 @@ async fn chat_completions_sends_auth_header_when_api_key_set() {
         backend_type: BackendType::OpenAiCompat,
         model: None,
     };
-    let provider = create_provider(config).unwrap();
+    let provider = create_provider(config, 300).unwrap();
 
     Mock::given(method("POST"))
         .and(path("/v1/chat/completions"))
@@ -72,7 +72,7 @@ async fn chat_completions_returns_error_on_4xx() {
         backend_type: BackendType::Ollama,
         model: None,
     };
-    let provider = create_provider(config).unwrap();
+    let provider = create_provider(config, 300).unwrap();
 
     Mock::given(method("POST"))
         .and(path("/v1/chat/completions"))
@@ -107,7 +107,7 @@ async fn gemini_chat_completions_non_stream() {
         backend_type: BackendType::Gemini,
         model: None,
     };
-    let provider = create_provider(config).unwrap();
+    let provider = create_provider(config, 300).unwrap();
 
     Mock::given(method("POST"))
         .and(path("/v1beta/openai/chat/completions"))
@@ -142,7 +142,7 @@ async fn gemini_sends_auth_header() {
         backend_type: BackendType::Gemini,
         model: None,
     };
-    let provider = create_provider(config).unwrap();
+    let provider = create_provider(config, 300).unwrap();
 
     Mock::given(method("POST"))
         .and(path("/v1beta/openai/chat/completions"))
@@ -166,7 +166,7 @@ async fn gemini_get_models() {
         backend_type: BackendType::Gemini,
         model: None,
     };
-    let provider = create_provider(config).unwrap();
+    let provider = create_provider(config, 300).unwrap();
 
     Mock::given(method("GET"))
         .and(path("/v1beta/openai/models"))

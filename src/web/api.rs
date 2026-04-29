@@ -41,6 +41,8 @@ pub struct RequestListItem {
     #[serde(skip_serializing_if = "Option::is_none")]
     backend_model: Option<String>,
     status: Option<u16>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    status_label: Option<String>,
     created_at: f64,
 }
 
@@ -196,6 +198,7 @@ async fn list_requests(State(state): State<WebState>) -> Json<Vec<RequestListIte
             model: r.model,
             backend_model: r.backend_model,
             status: r.status,
+            status_label: r.status_label,
             created_at: r.created_at,
         })
         .collect();
@@ -250,6 +253,7 @@ async fn get_request(
         "request_body": r.request_body,
         "response_body": r.response_body,
         "status": r.status,
+        "status_label": r.status_label,
         "response_headers": r.response_headers,
         "created_at": r.created_at,
     })))

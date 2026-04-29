@@ -17,9 +17,12 @@ pub struct OllamaProvider {
 }
 
 impl OllamaProvider {
-    pub fn new(config: BackendConfig) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+    pub fn new(
+        config: BackendConfig,
+        backend_timeout_secs: u64,
+    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         Ok(Self {
-            inner: OpenAiCompatProvider::new(config)?,
+            inner: OpenAiCompatProvider::new(config, backend_timeout_secs)?,
         })
     }
 }

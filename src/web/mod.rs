@@ -29,6 +29,8 @@ pub struct WebState {
     pub notify_tx: broadcast::Sender<NotifyEvent>,
     /// Lazy per-backend LLM provider instances; cleared when backends are edited via API.
     pub provider_pool: ProviderPool,
+    /// Per-request timeout for outbound calls to backends (from CLI `--backend-timeout-secs`).
+    pub backend_timeout_secs: u64,
 }
 
 pub fn router(state: WebState) -> Router {
