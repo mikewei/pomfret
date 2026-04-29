@@ -5,6 +5,7 @@ use axum::http::{Request, StatusCode};
 use pomfret::config::{AppState, BackendConfig, BackendType, Config};
 use pomfret::store::MemoryStore;
 use pomfret::web::{router, NotifyEvent, ProviderPool, WebState};
+use pomfret::routing::{ConditionType, RoutingConfig, RoutingRule, RoutingTarget};
 use std::path::PathBuf;
 use tokio::sync::broadcast;
 use tower::ServiceExt;
@@ -138,6 +139,93 @@ async fn get_models_forwards_to_backend() {
     let bytes = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
     let s = std::str::from_utf8(&bytes).unwrap();
     assert!(s.contains("llama2"));
+}
+
+#[tokio::test]
+async fn get_models_appends_aliases_and_overrides_owned_by() {
+    let mock = MockServer::start().await;
+    let backend = BackendConfig {
+        id: "test".to_string(),
+        name: "Test".to_string(),
+        base_url: format!("{}/v1", mock.uri()),
+        api_key: None,
+        backend_type: BackendType::Ollama,
+        model: None,
+    };
+    let config = Config {
+        backends: vec![backend],
+    };
+
+    let routing = RoutingConfig {
+        rules: vec![RoutingRule {
+            condition_type: ConditionType::Model,
+            condition_value: "alias1".to_string(),
+            target: RoutingTarget::FirstAvailable,
+            target_backend_id: None,
+        }],
+        default_target: RoutingTarget::FirstAvailable,
+        default_backend_id: None,
+    };
+
+    let app_state = AppState::new_with_routing(config, routing);
+    let store = MemoryStore::new(100);
+    let state = test_web_state(app_state, store, 300);
+    let app = router(state);
+
+    Mock::given(method("GET"))
+        .and(path("/v1/models"))
+        .respond_with(
+            wiremock::ResponseTemplate::new(200).set_body_raw(
+                r#"{
+                    "object":"list",
+                    "data":[
+                        {"id":"base","object":"model","created":1,"owned_by":"library"},
+                        {"id":"alias1","object":"model","created":1,"owned_by":"library"}
+                    ]
+                }"#
+                .as_bytes(),
+                "application/json",
+            ),
+        )
+        .mount(&mock)
+        .await;
+
+    let req = Request::builder()
+        .method("GET")
+        .uri("/v1/models")
+        .body(Body::empty())
+        .unwrap();
+    let res = app.oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    let bytes = axum::body::to_bytes(res.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    let data = v["data"].as_array().unwrap();
+
+    let alias = data
+        .iter()
+        .find(|m| m.get("id").and_then(|x| x.as_str()) == Some("alias1"))
+        .unwrap();
+    assert_eq!(alias.get("owned_by").and_then(|x| x.as_str()), Some("pomfret"));
+    assert_eq!(alias.get("object").and_then(|x| x.as_str()), Some("model"));
+    assert!(alias
+        .get("created")
+        .and_then(|x| x.as_u64())
+        .unwrap_or(0) > 0);
+
+    let base = data
+        .iter()
+        .find(|m| m.get("id").and_then(|x| x.as_str()) == Some("base"))
+        .unwrap();
+    assert_eq!(base.get("owned_by").and_then(|x| x.as_str()), Some("library"));
+
+    let alias_count = data
+        .iter()
+        .filter(|m| m.get("id").and_then(|x| x.as_str()) == Some("alias1"))
+        .count();
+    assert_eq!(alias_count, 1);
 }
 
 #[tokio::test]

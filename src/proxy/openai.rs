@@ -1,7 +1,7 @@
 //! OpenAI-compatible API handlers: parse request, call backend, return response.
 
 use crate::providers::{ProviderError, ProviderResponse};
-use crate::routing::resolve_backend;
+use crate::routing::{resolve_backend, ConditionType};
 use crate::store::RequestRecord;
 use crate::web::{NotifyEvent, WebState};
 use axum::body::Body;
@@ -11,9 +11,10 @@ use axum::response::IntoResponse;
 use futures_util::stream::unfold;
 use http_body_util::{BodyExt, StreamBody};
 use http_body::Frame;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::io;
 use tokio_stream::StreamExt;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Suffix appended to Pomfret-synthesized gateway error messages (not used for upstream passthrough bodies).
 fn pomfret_gateway_message(base: impl Into<String>) -> String {
@@ -601,7 +602,66 @@ pub async fn handle_models(
         Ok(bytes) => {
             tracing::info!(backend = %backend_name, status = 200, "backend models responded");
             tracing::trace!(backend = %backend_name, body = %String::from_utf8_lossy(&bytes), "raw models response body");
-            let resp_str = String::from_utf8_lossy(&bytes).to_string();
+            let upstream_bytes = bytes.to_vec();
+
+            let routing = state.app_state.get_routing_config().await;
+            let mut alias_ids: Vec<String> = Vec::new();
+            let mut seen: HashSet<String> = HashSet::new();
+            for rule in routing.rules {
+                if !matches!(&rule.condition_type, ConditionType::Model) {
+                    continue;
+                }
+                if rule.condition_value.trim().is_empty() {
+                    continue;
+                }
+                if seen.insert(rule.condition_value.clone()) {
+                    alias_ids.push(rule.condition_value);
+                }
+            }
+
+            let mut final_bytes = upstream_bytes;
+            if !alias_ids.is_empty() {
+                let created_ts = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0);
+                if let Ok(mut root) =
+                    serde_json::from_slice::<serde_json::Value>(&final_bytes)
+                {
+                    if let Some(data) = root.get_mut("data").and_then(|v| v.as_array_mut())
+                    {
+                        for alias_id in &alias_ids {
+                            let alias_entry = serde_json::json!({
+                                "id": alias_id,
+                                "object": "model",
+                                "created": created_ts,
+                                "owned_by": "pomfret",
+                            });
+                            let mut replaced = false;
+                            for item in data.iter_mut() {
+                                let item_id = item
+                                    .get("id")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or_default();
+                                if item_id == alias_id.as_str() {
+                                    *item = alias_entry.clone();
+                                    replaced = true;
+                                    break;
+                                }
+                            }
+                            if !replaced {
+                                data.push(alias_entry);
+                            }
+                        }
+
+                        if let Ok(merged_bytes) = serde_json::to_vec(&root) {
+                            final_bytes = merged_bytes;
+                        }
+                    }
+                }
+            }
+
+            let resp_str = String::from_utf8_lossy(&final_bytes).to_string();
             state
                 .store
                 .update_response(
@@ -616,7 +676,7 @@ pub async fn handle_models(
             (
                 StatusCode::OK,
                 [(header::CONTENT_TYPE, "application/json")],
-                bytes.to_vec(),
+                final_bytes,
             )
                 .into_response()
         }
