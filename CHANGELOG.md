@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [unreleased]
+
+### 🐛 Bug Fixes
+
+- Backend timeout and streaming ux
+
+### 🚀 Features
+
+- Add pomfret model aliases to the v1/models API result
+- Display proxy settings in startup and web page
+- Add jump-to-last in JSON array in Inspection page
+
 ## [0.3.0] - 2026-04-21
 
 ### 🚀 Features
