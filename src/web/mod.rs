@@ -56,7 +56,12 @@ async fn serve_index() -> Response {
     match EmbeddedAssets::get("index.html") {
         Some(content) => {
             let html = String::from_utf8_lossy(content.data.as_ref());
-            let html = html.replace("__POMFRET_CARGO_VERSION__", env!("CARGO_PKG_VERSION"));
+            let proxy_panel_html = crate::proxy_env::build_proxy_panel_html(
+                &crate::proxy_env::collect_proxy_env(),
+            );
+            let html = html
+                .replace("__POMFRET_CARGO_VERSION__", env!("CARGO_PKG_VERSION"))
+                .replace("__POMFRET_PROXY_PANEL_HTML__", &proxy_panel_html);
             ([("Content-Type", "text/html; charset=utf-8")], html).into_response()
         }
         None => (StatusCode::NOT_FOUND, "console not built").into_response(),

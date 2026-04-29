@@ -2,6 +2,7 @@
 
 use clap::Parser;
 use pomfret::config::{default_backends_config_path, resolve_config, AppState};
+use pomfret::proxy_env::collect_proxy_env;
 use pomfret::routing::{default_routing_config_path, load_routing_config};
 use pomfret::store::MemoryStore;
 use pomfret::web::{router, NotifyEvent, ProviderPool, WebState};
@@ -40,6 +41,34 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 .from_env_lossy(),
         )
         .init();
+
+    // Print proxy-related environment variables at startup (redacted) so users
+    // can quickly verify networking behavior for outbound backend requests.
+    let proxy_env = collect_proxy_env();
+    let any_proxy_set = proxy_env.http_proxy.is_some()
+        || proxy_env.https_proxy.is_some()
+        || proxy_env.all_proxy.is_some()
+        || proxy_env.no_proxy.is_some();
+    if any_proxy_set {
+        let mut parts: Vec<String> = Vec::new();
+        if let Some(v) = proxy_env.http_proxy {
+            parts.push(format!("http_proxy={v}"));
+        }
+        if let Some(v) = proxy_env.https_proxy {
+            parts.push(format!("https_proxy={v}"));
+        }
+        if let Some(v) = proxy_env.all_proxy {
+            parts.push(format!("all_proxy={v}"));
+        }
+        if let Some(v) = proxy_env.no_proxy {
+            parts.push(format!("no_proxy={v}"));
+        }
+
+        tracing::info!(
+            message = parts.join(" "),
+            "proxy environment snapshot"
+        );
+    }
 
     let cli = Cli::parse();
     let resolved = resolve_config(

@@ -435,7 +435,7 @@ pub async fn handle_chat_completions(
             store
                 .update_response(
                     &record_id,
-                    Some("streaming...".to_string()),
+                    Some("(streaming...)".to_string()),
                     Some(200),
                     Some("200⏳".to_string()),
                     Some(resp_hdrs.clone()),
