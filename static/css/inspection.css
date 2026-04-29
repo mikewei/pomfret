@@ -418,6 +418,35 @@
   background: var(--bg-hover, #3d3d3d);
 }
 
+/* Array head jump button: hover on the toggle line */
+.insp-tree-toggle .insp-tree-jump-last {
+  display: inline-flex;
+  align-items: center;
+  vertical-align: middle;
+  margin-left: 0.35rem;
+  opacity: 0;
+  padding: 1px 5px;
+  font-size: 0.7rem;
+  line-height: 1.2;
+  color: var(--text-muted);
+  background: var(--bg-elevated, #2d2d2d);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  cursor: pointer;
+  transition: opacity 0.12s, color 0.12s, background 0.12s;
+  white-space: nowrap;
+}
+
+.insp-tree-toggle:hover .insp-tree-jump-last,
+.insp-tree-toggle .insp-tree-jump-last:focus-visible {
+  opacity: 1;
+}
+
+.insp-tree-toggle .insp-tree-jump-last:hover {
+  color: var(--text);
+  background: var(--bg-hover, #3d3d3d);
+}
+
 /* Subtle highlight on JSON value hover */
 .insp-tree-value-wrap:hover .insp-tree-string,
 .insp-tree-value-wrap:hover .insp-tree-prim {

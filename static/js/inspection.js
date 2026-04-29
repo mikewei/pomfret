@@ -20,6 +20,8 @@
   /** --- Request body search (server ids + client highlights) --- */
   var MAX_SEARCH_MARKS = 400;
   var MAX_SEARCH_QUERY_LEN = 256;
+  // Array "jump to last" button threshold (only show for arrays longer than this).
+  var ARRAY_JUMP_LAST_MIN_LEN = 5;
   var searchNeedle = '';
   var matchedRecordIds = [];
   var searchMatchedTotal = 0;
@@ -574,6 +576,49 @@
     head.appendChild(document.createTextNode(' '));
     head.appendChild(document.createElement('span')).className = 'insp-tree-bracket';
     head.lastChild.textContent = suffix;
+
+    // For long arrays, offer a quick "jump to last element" hover button.
+    if (isArray && value.length > ARRAY_JUMP_LAST_MIN_LEN) {
+      var jumpLastBtn = document.createElement('button');
+      jumpLastBtn.type = 'button';
+      jumpLastBtn.className = 'insp-tree-jump-last';
+      jumpLastBtn.setAttribute('aria-label', t('jumpToLast'));
+      jumpLastBtn.textContent = t('jumpToLast');
+      jumpLastBtn.onclick = function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+
+        // Ensure the array children are visible before scrolling to the anchor.
+        if (body.classList.contains('insp-tree-closed')) {
+          body.classList.remove('insp-tree-closed');
+          head.setAttribute('aria-expanded', 'true');
+          head.classList.remove('insp-tree-toggled-closed');
+        }
+
+        var lastIdx = value.length - 1;
+        var lastPath = currentPath + '[' + lastIdx + ']';
+
+        var doScroll = function () {
+          var scope = head.closest('.insp-detail-panel') || document;
+          var target = scope.querySelector('.insp-tree-key-wrap[data-path="' + escapeCssAttr(lastPath) + '"]');
+          if (!target) return;
+          try {
+            target.scrollIntoView({ block: 'center', behavior: 'smooth' });
+          } catch (_) {
+            target.scrollIntoView({ block: 'center' });
+          }
+        };
+
+        // Next frame so class removals take effect in layout.
+        try {
+          requestAnimationFrame(doScroll);
+        } catch (_) {
+          doScroll();
+        }
+      };
+      head.appendChild(document.createTextNode(' '));
+      head.appendChild(jumpLastBtn);
+    }
     wrap.appendChild(head);
 
     var body = document.createElement('div');
