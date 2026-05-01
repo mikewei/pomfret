@@ -669,12 +669,12 @@
   var _cachedBackends = [];
 
   function conditionLabel(ct) {
-    var m = { model: t('routingCondModel'), length: t('routingCondLength'), regex: t('routingCondRegex') };
+    var m = { model: t('routingCondModel'), model_matches: t('routingCondModelMatches'), length: t('routingCondLength'), regex: t('routingCondRegex') };
     return m[ct] || ct;
   }
 
   function conditionPlaceholder(ct) {
-    var m = { model: t('routingPlaceholderModel'), length: t('routingPlaceholderLength'), regex: t('routingPlaceholderRegex') };
+    var m = { model: t('routingPlaceholderModel'), model_matches: t('routingPlaceholderModelMatches'), length: t('routingPlaceholderLength'), regex: t('routingPlaceholderRegex') };
     return m[ct] || '';
   }
 
@@ -729,6 +729,7 @@
       html += '<div><label>' + escapeHtml(t('routingIf')) + '</label>';
       html += '<select class="routing-cond-type" id="routing-cond-type-' + i + '">';
       html += '<option value="model"' + (rule.condition_type === 'model' ? ' selected' : '') + '>' + escapeHtml(t('routingCondModel')) + '</option>';
+      html += '<option value="model_matches"' + (rule.condition_type === 'model_matches' ? ' selected' : '') + '>' + escapeHtml(t('routingCondModelMatches')) + '</option>';
       html += '<option value="length"' + (rule.condition_type === 'length' ? ' selected' : '') + '>' + escapeHtml(t('routingCondLength')) + '</option>';
       html += '<option value="regex"' + (rule.condition_type === 'regex' ? ' selected' : '') + '>' + escapeHtml(t('routingCondRegex')) + '</option>';
       html += '</select></div>';

@@ -1,6 +1,6 @@
 //! Pomfret binary: Proxy Of Models For Routing, Evaluation & Telemetry — OpenAI-compatible proxy + web console.
 
-use clap::Parser;
+use clap::{ArgAction, Parser};
 use pomfret::config::{default_backends_config_path, resolve_config, AppState};
 use pomfret::proxy_env::collect_proxy_env;
 use pomfret::routing::{default_routing_config_path, load_routing_config};
@@ -14,7 +14,13 @@ use tracing_subscriber::EnvFilter;
 #[derive(Parser)]
 #[command(name = "pomfret")]
 #[command(about = "Proxy Of Models For Routing, Evaluation & Telemetry")]
+#[command(version)]
+#[command(disable_version_flag = true)]
 struct Cli {
+    /// Print version
+    #[arg(short = 'v', long = "version", action = ArgAction::Version)]
+    _version: (),
+
     /// Backends config file path (default: ~/.pomfret/backends.conf)
     #[arg(long, short = 'c')]
     config: Option<std::path::PathBuf>,

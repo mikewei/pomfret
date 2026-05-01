@@ -3,6 +3,8 @@
 //! Rules are evaluated top-to-bottom; the first matching rule determines the
 //! target backend. A default target always exists as the final fallback.
 //! Persisted to `~/.pomfret/routing.conf` (TOML).
+//!
+//! `model_matches` applies the pattern only to the request `model` string (not the body).
 
 use crate::config::{AppState, BackendConfig};
 use serde::{Deserialize, Serialize};
@@ -13,6 +15,7 @@ use std::path::Path;
 #[serde(rename_all = "snake_case")]
 pub enum ConditionType {
     Model,
+    ModelMatches,
     Length,
     Regex,
 }
@@ -94,6 +97,13 @@ fn rule_matches(
         ConditionType::Model => model
             .map(|m| m == rule.condition_value)
             .unwrap_or(false),
+        ConditionType::ModelMatches => {
+            if let Ok(re) = regex::Regex::new(&rule.condition_value) {
+                model.map(|m| re.is_match(m)).unwrap_or(false)
+            } else {
+                false
+            }
+        },
         ConditionType::Length => rule
             .condition_value
             .parse::<usize>()
@@ -172,4 +182,47 @@ pub async fn resolve_backend(
         routing.default_backend_id.as_deref(),
         app_state,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample_rule(condition_type: ConditionType, condition_value: &str) -> RoutingRule {
+        RoutingRule {
+            condition_type,
+            condition_value: condition_value.to_string(),
+            target: RoutingTarget::FirstAvailable,
+            target_backend_id: None,
+        }
+    }
+
+    #[test]
+    fn model_matches_when_pattern_matches() {
+        let rule = sample_rule(ConditionType::ModelMatches, r"^gpt-4");
+        assert!(rule_matches(
+            &rule,
+            Some("gpt-4-turbo"),
+            None,
+            0
+        ));
+    }
+
+    #[test]
+    fn model_matches_when_pattern_does_not_match() {
+        let rule = sample_rule(ConditionType::ModelMatches, r"^gpt-4");
+        assert!(!rule_matches(&rule, Some("claude-3"), None, 0));
+    }
+
+    #[test]
+    fn model_matches_false_without_model() {
+        let rule = sample_rule(ConditionType::ModelMatches, r".*");
+        assert!(!rule_matches(&rule, None, None, 0));
+    }
+
+    #[test]
+    fn model_matches_invalid_regex_never_matches() {
+        let rule = sample_rule(ConditionType::ModelMatches, r"(");
+        assert!(!rule_matches(&rule, Some("anything"), None, 0));
+    }
 }
