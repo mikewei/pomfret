@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [unreleased]
+
+### 🚀 Features
+
+- Support model name regex routing
+
 ## [0.4.0] - 2026-04-29
 
 ### 🐛 Bug Fixes
