@@ -119,8 +119,6 @@ curl http://localhost:8080/v1/chat/completions \
 }
 ```
 
-Web 控制台还提供一键生成 OpenClaw 配置的功能 — 在 Configuration 页面点击 **OpenClaw Config** 按钮即可。
-
 ## 配置
 
 Pomfret 可通过命令行参数或 TOML 配置文件（默认 `~/.pomfret/backends.conf`）进行配置。

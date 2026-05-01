@@ -581,15 +581,6 @@ body {
   flex-wrap: wrap;
   gap: 0.5rem;
 }
-.connect-actions {
-  margin-bottom: 1rem;
-}
-.modal .modal-code-block {
-  margin: 0 0 1rem;
-  max-height: 12rem;
-  overflow: auto;
-}
-
 /* Footer: at end of content; when content is short, pushed to bottom by margin-top: auto */
 .footer {
   flex-shrink: 0;

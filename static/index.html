@@ -65,9 +65,6 @@
               <button type="button" class="btn btn-small btn-secondary copy-code" data-target="curl-models" data-i18n="copy">Copy</button>
             </div>
           </div>
-          <div class="connect-actions">
-            <button type="button" class="btn btn-secondary btn-small" id="btn-openclaw-config" data-i18n="openclawConfig">OpenClaw Config</button>
-          </div>
         </section>
 
         __POMFRET_PROXY_PANEL_HTML__
@@ -183,17 +180,6 @@
       <span class="footer-sep">·</span>
       <a class="footer-license" href="https://opensource.org/licenses/MIT" target="_blank" rel="noopener noreferrer">MIT License</a>
     </footer>
-  </div>
-  <div id="openclaw-modal" class="modal-overlay" hidden role="dialog" aria-labelledby="openclaw-modal-title" aria-modal="true">
-    <div class="modal openclaw-modal-inner" onclick="event.stopPropagation()">
-      <h3 id="openclaw-modal-title" class="modal-title" data-i18n="openclawConfig">OpenClaw Config</h3>
-      <p class="modal-desc" data-i18n="openclawConfigExampleDesc">OpenClaw config example (in models.providers of openclaw.conf)</p>
-      <pre class="code-block modal-code-block" id="openclaw-config-content"><code></code></pre>
-      <div class="modal-actions">
-        <button type="button" class="btn btn-secondary" id="openclaw-config-copy" data-i18n="copy">Copy</button>
-        <button type="button" class="btn btn-ghost" id="openclaw-modal-close" data-i18n="close">Close</button>
-      </div>
-    </div>
   </div>
   <div id="confirm-modal" class="modal-overlay" hidden role="dialog" aria-labelledby="confirm-modal-title" aria-modal="true">
     <div class="modal confirm-modal-inner" onclick="event.stopPropagation()">

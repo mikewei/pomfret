@@ -119,8 +119,6 @@ curl http://localhost:8080/v1/chat/completions \
 }
 ```
 
-The web console also provides a one-click OpenClaw config generator — just click the **OpenClaw Config** button on the Configuration page.
-
 ## Configuration
 
 Pomfret can be configured via CLI flags or a TOML config file (`~/.pomfret/backends.conf` by default).

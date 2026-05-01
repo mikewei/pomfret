@@ -98,55 +98,6 @@
         }
       };
     });
-
-    function buildOpenclawConfigJson() {
-      var base = baseUrl() + '/v1';
-      return JSON.stringify({
-        pomfret: {
-          baseUrl: base,
-          apiKey: 'anything',
-          api: 'openai-completions',
-          authHeader: false,
-          models: [
-            {
-              id: 'qwen3.5:9b',
-              name: 'qwen3.5:9b',
-              api: 'openai-completions',
-              reasoning: true,
-              input: ['text'],
-              cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-              contextWindow: 65536,
-              maxTokens: 65536
-            }
-          ]
-        }
-      }, null, 2);
-    }
-    var openclawModal = document.getElementById('openclaw-modal');
-    var openclawContentEl = document.getElementById('openclaw-config-content');
-    var btnOpenclawConfig = document.getElementById('btn-openclaw-config');
-    var openclawCopyBtn = document.getElementById('openclaw-config-copy');
-    var openclawCloseBtn = document.getElementById('openclaw-modal-close');
-    if (btnOpenclawConfig) {
-      btnOpenclawConfig.onclick = function () {
-        if (openclawContentEl) openclawContentEl.querySelector('code').textContent = buildOpenclawConfigJson();
-        if (openclawModal) openclawModal.hidden = false;
-      };
-    }
-    if (openclawCopyBtn) {
-      openclawCopyBtn.onclick = function () {
-        var code = openclawContentEl && openclawContentEl.querySelector('code');
-        if (code && navigator.clipboard && navigator.clipboard.writeText) {
-          navigator.clipboard.writeText(code.textContent);
-        }
-      };
-    }
-    if (openclawCloseBtn) openclawCloseBtn.onclick = function () { if (openclawModal) openclawModal.hidden = true; };
-    if (openclawModal) {
-      openclawModal.onclick = function (e) {
-        if (e.target === openclawModal) openclawModal.hidden = true;
-      };
-    }
   }
 
   function renderBackendsList(backends) {
