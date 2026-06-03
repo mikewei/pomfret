@@ -852,6 +852,13 @@
     return (item.status != null ? String(item.status) : '-') + '|' + (item.status_label || '');
   }
 
+  function formatBytes(n) {
+    if (n == null) return '-';
+    if (n < 1024) return n + ' B';
+    if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
+    return (n / (1024 * 1024)).toFixed(1) + ' MB';
+  }
+
   function renderList(requests) {
     var prevRequests = requestsCache || [];
     var nextRequests = requests || [];
@@ -860,7 +867,7 @@
     requestsCache = nextRequests;
     if (!listEl) return;
     if (!requests || requests.length === 0) {
-      listEl.innerHTML = '<tr><td colspan="6">' + escapeHtml(t('noRequests')) + '</td></tr>';
+      listEl.innerHTML = '<tr><td colspan="8">' + escapeHtml(t('noRequests')) + '</td></tr>';
       detailPanelEl.hidden = true;
       selectedId = null;
       clearAllSearchMarks();
@@ -878,6 +885,8 @@
         '<td class="insp-cell-path" title="' + escapeHtml(r.path) + '">' + escapeHtml(r.path) + '</td>' +
         '<td class="insp-cell-model" title="' + escapeHtml(r.model || '-') + '">' + escapeHtml(r.model || '-') + '</td>' +
         '<td class="insp-cell-backend" title="' + escapeHtml(backendModelLabel(r)) + '">' + escapeHtml(backendModelLabel(r)) + '</td>' +
+        '<td class="insp-cell-size">' + escapeHtml(formatBytes(r.request_body_size)) + '</td>' +
+        '<td class="insp-cell-size">' + escapeHtml(formatBytes(r.response_body_size)) + '</td>' +
         '<td class="insp-cell-status ' + statusClass + '">' + statusText + '</td>' +
         '</tr>';
     }).join('');
@@ -918,7 +927,7 @@
       })
       .catch(function () {
         renderList([]);
-        if (listEl) listEl.innerHTML = '<tr><td colspan="6">' + escapeHtml(t('loadFailed')) + '</td></tr>';
+        if (listEl) listEl.innerHTML = '<tr><td colspan="8">' + escapeHtml(t('loadFailed')) + '</td></tr>';
       });
   }
 

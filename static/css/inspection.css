@@ -72,6 +72,7 @@
 .insp-table .insp-cell-path { max-width: 12em; overflow: hidden; text-overflow: ellipsis; }
 .insp-table .insp-cell-backend { max-width: 8em; overflow: hidden; text-overflow: ellipsis; }
 .insp-table .insp-cell-model { max-width: 10em; overflow: hidden; text-overflow: ellipsis; }
+.insp-table .insp-cell-size { width: 4.5em; text-align: right; white-space: nowrap; }
 .insp-table .insp-cell-status { width: 3.5em; }
 
 .insp-trace-row {

@@ -44,6 +44,10 @@ pub struct RequestListItem {
     #[serde(skip_serializing_if = "Option::is_none")]
     status_label: Option<String>,
     created_at: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    request_body_size: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    response_body_size: Option<usize>,
 }
 
 #[derive(Serialize)]
@@ -200,6 +204,8 @@ async fn list_requests(State(state): State<WebState>) -> Json<Vec<RequestListIte
             status: r.status,
             status_label: r.status_label,
             created_at: r.created_at,
+            request_body_size: r.request_body_size,
+            response_body_size: r.response_body_size,
         })
         .collect();
     Json(items)
@@ -256,6 +262,8 @@ async fn get_request(
         "status_label": r.status_label,
         "response_headers": r.response_headers,
         "created_at": r.created_at,
+        "request_body_size": r.request_body_size,
+        "response_body_size": r.response_body_size,
     })))
 }
 
