@@ -557,6 +557,19 @@
     });
   }
 
+  function startBackendStatusPolling() {
+    stopBackendStatusPolling();
+    loadBackendsAndStatus();
+    _backendStatusPollTimer = setInterval(loadBackendsAndStatus, BACKEND_STATUS_POLL_INTERVAL_MS);
+  }
+
+  function stopBackendStatusPolling() {
+    if (_backendStatusPollTimer) {
+      clearInterval(_backendStatusPollTimer);
+      _backendStatusPollTimer = null;
+    }
+  }
+
   function switchTab(tabName) {
     tabButtons.forEach(function (btn) {
       var isActive = btn.getAttribute('data-tab') === tabName;
@@ -577,6 +590,11 @@
         var dockPanel = document.getElementById('dock-search-panel');
         if (dockPanel) dockPanel.hidden = true;
       }
+    }
+    if (tabName === 'configuration') {
+      startBackendStatusPolling();
+    } else {
+      stopBackendStatusPolling();
     }
   }
 
@@ -940,6 +958,8 @@
 
   var NOTIFY_RETRY_MS = 3000;
   var FALLBACK_POLL_INTERVAL_MS = 10000;
+  var BACKEND_STATUS_POLL_INTERVAL_MS = 10000;
+  var _backendStatusPollTimer = null;
 
   var connectionBannerEl = document.getElementById('connection-banner');
   var connectionBannerTextEl = document.getElementById('connection-banner-text');
@@ -1030,9 +1050,9 @@
     initChart();
     loadTimeseries();
     startNotifyPoll();
+    startBackendStatusPolling();
     setInterval(function () {
       loadRequests();
-      loadBackendsAndStatus();
       loadTimeseries();
     }, FALLBACK_POLL_INTERVAL_MS);
   }
