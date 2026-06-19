@@ -16,6 +16,62 @@ use std::io;
 use tokio_stream::StreamExt;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+/// Drop guard that clears the streaming placeholder ("200⏳") when a
+/// stream response is dropped before normal completion (e.g. client
+/// disconnect).  When that happens the partial SSE body accumulated so
+/// far is reconstructed and saved so the UI can show what was received.
+/// In the normal path `defuse()` is called and Drop is a no-op.
+struct StreamGuard {
+    store: crate::store::MemoryStore,
+    rid: String,
+    hdrs: String,
+    tx: tokio::sync::broadcast::Sender<NotifyEvent>,
+    buf: Vec<u8>,
+    armed: bool,
+}
+
+impl StreamGuard {
+    fn new(
+        store: crate::store::MemoryStore,
+        rid: String,
+        hdrs: String,
+        tx: tokio::sync::broadcast::Sender<NotifyEvent>,
+    ) -> Self {
+        Self { store, rid, hdrs, tx, buf: Vec::new(), armed: true }
+    }
+
+    /// Mark the stream as having completed normally — suppress Drop cleanup.
+    fn defuse(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for StreamGuard {
+    fn drop(&mut self) {
+        if !self.armed {
+            return;
+        }
+        let raw = String::from_utf8_lossy(&self.buf).to_string();
+        let body = reconstruct_from_sse(&raw);
+        let store = self.store.clone();
+        let rid = self.rid.clone();
+        let hdrs = self.hdrs.clone();
+        let tx = self.tx.clone();
+        tokio::spawn(async move {
+            store
+                .update_response(
+                    &rid,
+                    Some(body),
+                    Some(200),
+                    None, // clear the funnel
+                    Some(hdrs),
+                )
+                .await;
+            let _ = tx.send(NotifyEvent::Requests);
+        });
+    }
+}
+
 /// Suffix appended to Pomfret-synthesized gateway error messages (not used for upstream passthrough bodies).
 fn pomfret_gateway_message(base: impl Into<String>) -> String {
     let s = base.into();
@@ -443,20 +499,27 @@ pub async fn handle_chat_completions(
                 .await;
             let _ = notify_tx.send(NotifyEvent::Requests);
 
+            let guard = StreamGuard::new(
+                store.clone(),
+                record_id.clone(),
+                resp_hdrs.clone(),
+                notify_tx.clone(),
+            );
+
             let recording_stream = unfold(
-                (s, Vec::<u8>::new(), store, record_id, resp_hdrs, notify_tx, false),
+                (s, store, record_id, resp_hdrs, notify_tx, false, guard),
                 |state| async move {
-                    let (mut inner, mut buf, store, rid, hdrs, tx, stream_failed) = state;
+                    let (mut inner, store, rid, hdrs, tx, stream_failed, mut guard) = state;
                     if stream_failed {
                         return None;
                     }
                     match inner.next().await {
                         Some(Ok(chunk)) => {
                             tracing::trace!(chunk = %String::from_utf8_lossy(&chunk), "raw stream chunk");
-                            buf.extend_from_slice(&chunk);
+                            guard.buf.extend_from_slice(&chunk);
                             Some((
                                 Ok::<_, io::Error>(Frame::data(chunk)),
-                                (inner, buf, store, rid, hdrs, tx, false),
+                                (inner, store, rid, hdrs, tx, false, guard),
                             ))
                         }
                         Some(Err(e)) => {
@@ -476,13 +539,14 @@ pub async fn handle_chat_completions(
                                 )
                                 .await;
                             let _ = tx.send(NotifyEvent::Requests);
+                            guard.defuse();
                             Some((
                                 Err(io::Error::new(io::ErrorKind::Other, e)),
-                                (inner, buf, store, rid, hdrs, tx, true),
+                                (inner, store, rid, hdrs, tx, true, guard),
                             ))
                         }
                         None => {
-                            let raw = String::from_utf8_lossy(&buf).to_string();
+                            let raw = String::from_utf8_lossy(&guard.buf).to_string();
                             let body = reconstruct_from_sse(&raw);
                             let (pt, ct, tt) = extract_usage(&body);
                             store
@@ -496,6 +560,7 @@ pub async fn handle_chat_completions(
                                 .await;
                             store.update_tokens(&rid, pt, ct, tt).await;
                             let _ = tx.send(NotifyEvent::Requests);
+                            guard.defuse();
                             None
                         }
                     }
