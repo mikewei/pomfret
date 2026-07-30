@@ -32,6 +32,7 @@
       backendTypeOllama: 'Ollama',
       backendTypeOpenAiCompat: 'OpenAI-compatible',
       backendTypeGemini: 'Google Gemini',
+      backendTypePassthrough: 'Passthrough',
       baseUrl: 'Base URL',
       apiKeyLabel: 'API Key (optional, leave blank to keep)',
       apiKeySet: 'Set',
@@ -62,6 +63,8 @@
       model: 'Model',
       backendModel: 'Backend (Model)',
       status: 'Status',
+      reqSize: 'Request',
+      resSize: 'Response',
       backendConnectivity: 'Backend connectivity & usage',
       refreshStatus: 'Refresh status',
       reachable: 'Reachable',
@@ -178,6 +181,7 @@
       backendTypeOllama: 'Ollama',
       backendTypeOpenAiCompat: 'OpenAI 兼容',
       backendTypeGemini: 'Google Gemini',
+      backendTypePassthrough: '透传',
       baseUrl: 'Base URL',
       apiKeyLabel: 'API Key（可选，留空则保持原样）',
       apiKeySet: '已设置',
@@ -208,6 +212,8 @@
       model: '模型',
       backendModel: '后端 (模型)',
       status: '状态',
+      reqSize: '请求',
+      resSize: '响应',
       backendConnectivity: '后端连通性与使用',
       refreshStatus: '刷新状态',
       reachable: '可达',
@@ -316,7 +322,7 @@
     try {
       var saved = localStorage.getItem(STORAGE_KEY);
       if (saved === 'en' || saved === 'zh-CN') return saved;
-    } catch (e) {}
+    } catch (e) { }
     return detectLang();
   })();
   var dict = messages[currentLang] || messages.en;
@@ -345,12 +351,12 @@
 
   function setLang(lang) {
     if (lang !== 'en' && lang !== 'zh-CN') return;
-    try { localStorage.setItem(STORAGE_KEY, lang); } catch (e) {}
+    try { localStorage.setItem(STORAGE_KEY, lang); } catch (e) { }
     currentLang = lang;
     dict = messages[lang] || messages.en;
     if (window.i18n) window.i18n.lang = currentLang;
     applyTranslations();
-    try { document.dispatchEvent(new CustomEvent('i18n:changed')); } catch (e) {}
+    try { document.dispatchEvent(new CustomEvent('i18n:changed')); } catch (e) { }
   }
 
   window.i18n = { t: t, lang: currentLang, setLang: setLang };

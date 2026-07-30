@@ -32,6 +32,10 @@ pub struct RequestRecord {
     pub response_headers: Option<String>,
     pub created_at: f64,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub request_body_size: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub response_body_size: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub prompt_tokens: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub completion_tokens: Option<u64>,
@@ -51,6 +55,7 @@ impl RequestRecord {
         backend_model: Option<String>,
         request_body: Option<String>,
     ) -> Self {
+        let request_body_size = request_body.as_ref().map(|b| b.len());
         Self {
             id: Uuid::new_v4().to_string(),
             method,
@@ -67,6 +72,8 @@ impl RequestRecord {
             status_label: None,
             response_headers: None,
             created_at: now_secs(),
+            request_body_size,
+            response_body_size: None,
             prompt_tokens: None,
             completion_tokens: None,
             total_tokens: None,
@@ -80,6 +87,7 @@ impl RequestRecord {
         status_label: Option<String>,
         response_headers: Option<String>,
     ) {
+        self.response_body_size = body.as_ref().map(|b| b.len());
         self.response_body = body;
         self.status = status;
         self.status_label = status_label;
