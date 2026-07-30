@@ -310,6 +310,11 @@ fn masked_secret_hint(secret: &str) -> Option<String> {
 
 /// Probe backend: GET base_url/models with short timeout.
 async fn probe_backend(b: &BackendConfig) -> (bool, Option<String>) {
+    // Passthrough backends may not expose a /models endpoint (e.g. Anthropic,
+    // custom APIs), so skip the probe and assume reachable.
+    if b.backend_type == BackendType::Passthrough {
+        return (true, None);
+    }
     let base = match b.backend_type {
         BackendType::Gemini => crate::providers::gemini::resolve_base_url(&b.base_url),
         _ => b.base_url.trim_end_matches('/').to_string(),

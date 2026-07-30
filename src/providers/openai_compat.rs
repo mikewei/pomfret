@@ -4,6 +4,7 @@
 use super::{LlmProvider, ProviderError, ProviderResponse};
 use crate::config::BackendConfig;
 use async_trait::async_trait;
+use axum::http::StatusCode;
 use bytes::Bytes;
 use reqwest::Client;
 use tokio_stream::StreamExt;
@@ -74,7 +75,7 @@ impl LlmProvider for OpenAiCompatProvider {
             Ok(ProviderResponse::Stream(Box::pin(stream)))
         } else {
             let body = res.bytes().await.map_err(ProviderError::Request)?;
-            Ok(ProviderResponse::Body(body))
+            Ok(ProviderResponse::Body { bytes: body, status: StatusCode::OK })
         }
     }
 

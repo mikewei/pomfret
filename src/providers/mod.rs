@@ -7,9 +7,11 @@
 pub(crate) mod gemini;
 mod ollama;
 mod openai_compat;
+pub(crate) mod passthrough;
 
 use crate::config::{BackendConfig, BackendType};
 use async_trait::async_trait;
+use axum::http::HeaderMap;
 use bytes::Bytes;
 use futures_util::Stream;
 use std::pin::Pin;
@@ -32,9 +34,12 @@ impl std::fmt::Display for ProviderError {
 
 impl std::error::Error for ProviderError {}
 
-/// Response from a provider: either a complete body or a byte stream.
+/// Response from a provider: either a complete body with status code, or a byte stream.
 pub enum ProviderResponse {
-    Body(Bytes),
+    Body {
+        bytes: Bytes,
+        status: axum::http::StatusCode,
+    },
     Stream(Pin<Box<dyn Stream<Item = Result<Bytes, std::io::Error>> + Send>>),
 }
 
@@ -54,6 +59,27 @@ pub trait LlmProvider: Send + Sync {
 
     /// List available models from the upstream service.
     async fn get_models(&self) -> Result<Bytes, ProviderError>;
+
+    /// Proxy an arbitrary HTTP request to the upstream.
+    ///
+    /// The default implementation parses `stream` from a JSON body and
+    /// delegates to [`chat_completions`](LlmProvider::chat_completions).
+    /// Passthrough providers override this to forward the exact method,
+    /// path, and headers the client sent.
+    async fn proxy_request(
+        &self,
+        _method: &str,
+        _path: &str,
+        _headers: &HeaderMap,
+        body: Bytes,
+    ) -> Result<ProviderResponse, ProviderError> {
+        let stream = String::from_utf8_lossy(&body)
+            .parse::<serde_json::Value>()
+            .ok()
+            .and_then(|v| v.get("stream")?.as_bool())
+            .unwrap_or(false);
+        self.chat_completions(body, stream).await
+    }
 }
 
 /// Create a provider instance from backend configuration.
@@ -71,6 +97,10 @@ pub fn create_provider(
             backend_timeout_secs,
         )?)),
         BackendType::Gemini => Ok(Box::new(gemini::GeminiProvider::new(
+            config,
+            backend_timeout_secs,
+        )?)),
+        BackendType::Passthrough => Ok(Box::new(passthrough::PassthroughProvider::new(
             config,
             backend_timeout_secs,
         )?)),

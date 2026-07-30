@@ -7,7 +7,7 @@ pub use api::NotifyEvent;
 pub use provider_pool::ProviderPool;
 
 use axum::response::{IntoResponse, Response};
-use axum::routing::get;
+use axum::routing::{any, get};
 use axum::Router;
 use crate::embed::EmbeddedAssets;
 use crate::config::AppState;
@@ -45,6 +45,7 @@ pub fn router(state: WebState) -> Router {
         .route("/console", get(serve_index))
         .route("/console/*path", get(serve_console_fallback))
         .route("/static/*path", get(serve_static))
+        .route("/*path", any(proxy::handle_passthrough))
         .with_state(state)
 }
 

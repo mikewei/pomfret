@@ -455,10 +455,9 @@ pub async fn handle_chat_completions(
     tracing::info!(backend = %backend_name, "forwarding chat completions to backend");
 
     match provider.chat_completions(body, stream).await {
-        Ok(ProviderResponse::Body(resp_bytes)) => {
-            tracing::info!(backend = %backend_name, status = 200, stream = false, "backend responded");
+        Ok(ProviderResponse::Body { bytes: resp_bytes, status }) => {
+            tracing::info!(backend = %backend_name, status = %status, stream = false, "backend responded");
             tracing::trace!(backend = %backend_name, body = %String::from_utf8_lossy(&resp_bytes), "raw response body");
-            let status = StatusCode::OK;
             let final_bytes = resp_bytes;
             let resp_str = String::from_utf8_lossy(&final_bytes).to_string();
             let resp_hdrs = response_headers_json("application/json");
@@ -764,6 +763,245 @@ pub async fn handle_models(
                 .await;
             let _ = state.notify_tx.send(NotifyEvent::Requests);
             (code, [("Content-Type", "application/json")], err_str).into_response()
+        }
+    }
+}
+
+/// Fallback handler for any HTTP method + path not explicitly registered.
+/// Forwards the request as-is to the configured backend; records it for
+/// inspection.  Returns 503 if no backend is available via routing.
+#[tracing::instrument(skip(state, request))]
+pub async fn handle_passthrough(
+    State(state): State<WebState>,
+    request: Request,
+) -> impl IntoResponse {
+    let method = request.method().clone();
+    let path = request.uri().path().to_string();
+    let query = request.uri().query().map(|s| s.to_string());
+    let (parts, body) = request.into_parts();
+    let headers = parts.headers.clone();
+    let request_headers = request_headers_json(&headers);
+
+    let body = match body.collect().await {
+        Ok(b) => b.to_bytes(),
+        Err(_) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                [("Content-Type", "application/json")],
+                r#"{"error":{"message":"Failed to read body","type":"gateway_error"}}"#,
+            )
+                .into_response();
+        }
+    };
+    let body_str = String::from_utf8_lossy(&body).to_string();
+
+    // Try to extract `model` from the body so that Model/ModelMatches routing
+    // rules can match passthrough requests (e.g. Anthropic, other JSON APIs).
+    let model = serde_json::from_str::<ChatRequestMin>(&body_str)
+        .ok()
+        .and_then(|r| r.model);
+
+    let backend = match resolve_backend(
+        &state.app_state,
+        model.as_deref(),
+        Some(&body_str),
+        body.len(),
+    )
+    .await
+    {
+        Some(b) => b,
+        None => {
+            tracing::warn!("passthrough called but no backend available via routing");
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                [("Content-Type", "application/json")],
+                r#"{"error":{"message":"No backend available","type":"gateway_error"}}"#,
+            )
+                .into_response();
+        }
+    };
+
+    tracing::info!(
+        method = %method,
+        path = %path,
+        backend = %backend.name,
+        "received passthrough request"
+    );
+
+    let backend_id = backend.id.clone();
+    let backend_name = backend.name.clone();
+    let provider = match state
+        .provider_pool
+        .get_or_create(backend, state.backend_timeout_secs)
+    {
+        Ok(p) => p,
+        Err(_) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                [("Content-Type", "application/json")],
+                r#"{"error":{"message":"Failed to create provider","type":"gateway_error"}}"#,
+            )
+                .into_response();
+        }
+    };
+
+    let record = RequestRecord::new(
+        method.to_string(),
+        path.clone(),
+        query,
+        request_headers,
+        Some(backend_id),
+        Some(backend_name.clone()),
+        model.clone(),
+        None,
+        Some(body_str),
+    );
+    let record_id = record.id.clone();
+    state.store.push(record).await;
+    let _ = state.notify_tx.send(NotifyEvent::Requests);
+
+    tracing::info!(backend = %backend_name, method = %method, path = %path, "forwarding passthrough to backend");
+
+    match provider.proxy_request(method.as_str(), &path, &headers, body).await {
+        Ok(ProviderResponse::Body { bytes: resp_bytes, status }) => {
+            let resp_str = String::from_utf8_lossy(&resp_bytes).to_string();
+            let resp_hdrs = response_headers_json("application/json");
+            tracing::info!(backend = %backend_name, status = %status, "passthrough backend responded");
+            tracing::trace!(backend = %backend_name, body = %resp_str, "raw passthrough response body");
+            state
+                .store
+                .update_response(
+                    &record_id,
+                    Some(resp_str),
+                    Some(status.as_u16()),
+                    None,
+                    Some(resp_hdrs),
+                )
+                .await;
+            let _ = state.notify_tx.send(NotifyEvent::Requests);
+            (
+                status,
+                [(header::CONTENT_TYPE, "application/json")],
+                resp_bytes.to_vec(),
+            )
+                .into_response()
+        }
+        Ok(ProviderResponse::Stream(s)) => {
+            tracing::info!(backend = %backend_name, "passthrough backend responded with stream");
+            let store = state.store.clone();
+            let notify_tx = state.notify_tx.clone();
+            let resp_hdrs = response_headers_json("text/event-stream");
+            store
+                .update_response(
+                    &record_id,
+                    Some("(streaming...)".to_string()),
+                    Some(200),
+                    Some("200⏳".to_string()),
+                    Some(resp_hdrs.clone()),
+                )
+                .await;
+            let _ = notify_tx.send(NotifyEvent::Requests);
+
+            let guard = StreamGuard::new(
+                store.clone(),
+                record_id.clone(),
+                resp_hdrs.clone(),
+                notify_tx.clone(),
+            );
+
+            let recording_stream = unfold(
+                (s, store, record_id, resp_hdrs, notify_tx, false, guard),
+                |state| async move {
+                    let (mut inner, store, rid, hdrs, tx, stream_failed, mut guard) = state;
+                    if stream_failed {
+                        return None;
+                    }
+                    match inner.next().await {
+                        Some(Ok(chunk)) => {
+                            tracing::trace!(chunk = %String::from_utf8_lossy(&chunk), "raw passthrough stream chunk");
+                            guard.buf.extend_from_slice(&chunk);
+                            Some((
+                                Ok::<_, io::Error>(Frame::data(chunk)),
+                                (inner, store, rid, hdrs, tx, false, guard),
+                            ))
+                        }
+                        Some(Err(e)) => {
+                            let (code, msg) = map_stream_io_error(&e);
+                            let err_json = serde_json::json!({
+                                "error": { "message": msg, "type": "gateway_error" }
+                            });
+                            let err_str = err_json.to_string();
+                            let hdrs_err = response_headers_json("application/json");
+                            store
+                                .update_response(
+                                    &rid,
+                                    Some(err_str),
+                                    Some(code.as_u16()),
+                                    None,
+                                    Some(hdrs_err),
+                                )
+                                .await;
+                            let _ = tx.send(NotifyEvent::Requests);
+                            guard.defuse();
+                            Some((
+                                Err(io::Error::new(io::ErrorKind::Other, e)),
+                                (inner, store, rid, hdrs, tx, true, guard),
+                            ))
+                        }
+                        None => {
+                            let raw = String::from_utf8_lossy(&guard.buf).to_string();
+                            let body_text = reconstruct_from_sse(&raw);
+                            store
+                                .update_response(
+                                    &rid,
+                                    Some(body_text),
+                                    Some(200),
+                                    None,
+                                    Some(hdrs),
+                                )
+                                .await;
+                            let _ = tx.send(NotifyEvent::Requests);
+                            guard.defuse();
+                            None
+                        }
+                    }
+                },
+            );
+
+            let stream_body = StreamBody::new(recording_stream);
+            (
+                StatusCode::OK,
+                [(header::CONTENT_TYPE, "text/event-stream")],
+                Body::new(stream_body),
+            )
+                .into_response()
+        }
+        Err(e) => {
+            let (code, msg) = map_provider_upstream_error(&e);
+            tracing::info!(backend = %backend_name, status = %code, "passthrough backend error");
+            tracing::trace!(backend = %backend_name, status = %code, body = %msg, "raw passthrough error response");
+            let resp_hdrs = response_headers_json("application/json");
+            let err_json = serde_json::json!({
+                "error": { "message": msg, "type": "gateway_error" }
+            });
+            let err_str = err_json.to_string();
+            state
+                .store
+                .update_response(
+                    &record_id,
+                    Some(err_str.clone()),
+                    Some(code.as_u16()),
+                    None,
+                    Some(resp_hdrs),
+                )
+                .await;
+            let _ = state.notify_tx.send(NotifyEvent::Requests);
+            (
+                code,
+                [("Content-Type", "application/json")],
+                err_str,
+            )
+                .into_response()
         }
     }
 }

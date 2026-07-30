@@ -13,6 +13,7 @@ use super::openai_compat::OpenAiCompatProvider;
 use super::{LlmProvider, ProviderError, ProviderResponse};
 use crate::config::BackendConfig;
 use async_trait::async_trait;
+use axum::http::StatusCode;
 use bytes::Bytes;
 use futures_util::stream::unfold;
 use std::io;
@@ -162,8 +163,8 @@ impl LlmProvider for GeminiProvider {
         let body = self.prepare_request_body(body);
         let res = self.inner.chat_completions(body, stream).await?;
         match res {
-            ProviderResponse::Body(resp_bytes) => {
-                Ok(ProviderResponse::Body(self.process_response_body(resp_bytes)))
+            ProviderResponse::Body { bytes: resp_bytes, status: _ } => {
+                Ok(ProviderResponse::Body { bytes: self.process_response_body(resp_bytes), status: StatusCode::OK })
             }
             ProviderResponse::Stream(s) => {
                 let cache = self.thought_signatures.clone();

@@ -117,7 +117,7 @@
       html += '<p class="backends-empty">' + escapeHtml(t('noBackends')) + '</p>';
     }
     list.forEach(function (b, i) {
-      var typeLabel = (b.backend_type === 'ollama') ? t('backendTypeOllama') : (b.backend_type === 'gemini') ? t('backendTypeGemini') : t('backendTypeOpenAiCompat');
+      var typeLabel = (b.backend_type === 'ollama') ? t('backendTypeOllama') : (b.backend_type === 'gemini') ? t('backendTypeGemini') : (b.backend_type === 'passthrough') ? t('backendTypePassthrough') : t('backendTypeOpenAiCompat');
       html += '<div class="backend-row" data-index="' + i + '">';
       html += '<div class="backend-row-head" data-index="' + i + '">';
       html += '<span class="backend-row-name-wrap">';
@@ -129,7 +129,7 @@
       html += '<div class="backend-edit" data-index="' + i + '">';
       html += '<div class="backend-fields">';
       html += '<div><label>' + escapeHtml(t('name')) + '</label><input type="text" class="be-name" value="' + escapeHtml(b.name) + '" /></div>';
-      html += '<div><label>' + escapeHtml(t('backendType')) + '</label><select class="be-backend-type"><option value="ollama"' + (b.backend_type === 'ollama' ? ' selected' : '') + '>' + escapeHtml(t('backendTypeOllama')) + '</option><option value="openai_compat"' + (b.backend_type === 'openai_compat' ? ' selected' : '') + '>' + escapeHtml(t('backendTypeOpenAiCompat')) + '</option><option value="gemini"' + (b.backend_type === 'gemini' ? ' selected' : '') + '>' + escapeHtml(t('backendTypeGemini')) + '</option></select></div>';
+      html += '<div><label>' + escapeHtml(t('backendType')) + '</label><select class="be-backend-type"><option value="ollama"' + (b.backend_type === 'ollama' ? ' selected' : '') + '>' + escapeHtml(t('backendTypeOllama')) + '</option><option value="openai_compat"' + (b.backend_type === 'openai_compat' ? ' selected' : '') + '>' + escapeHtml(t('backendTypeOpenAiCompat')) + '</option><option value="gemini"' + (b.backend_type === 'gemini' ? ' selected' : '') + '>' + escapeHtml(t('backendTypeGemini')) + '</option><option value="passthrough"' + (b.backend_type === 'passthrough' ? ' selected' : '') + '>' + escapeHtml(t('backendTypePassthrough')) + '</option></select></div>';
       html += '<div><label>' + escapeHtml(t('baseUrl')) + '</label><input type="text" class="be-base-url" value="' + escapeHtml(b.base_url) + '" placeholder="https://api.openai.com" /></div>';
       var apiKeyPlaceholder = (b.api_key_set ? t('apiKeySet') : t('apiKeyNotSet'));
       if (b.api_key_set && b.api_key_hint) apiKeyPlaceholder += ' ' + b.api_key_hint;
@@ -147,7 +147,7 @@
     html += '<div class="backend-edit backend-edit-new" id="backend-edit-new" hidden>';
     html += '<div class="backend-fields">';
     html += '<div><label>' + escapeHtml(t('name')) + '</label><input type="text" class="be-name" id="new-be-name" placeholder="" /></div>';
-    html += '<div><label>' + escapeHtml(t('backendType')) + '</label><select class="be-backend-type" id="new-be-backend-type"><option value="ollama">' + escapeHtml(t('backendTypeOllama')) + '</option><option value="openai_compat" selected>' + escapeHtml(t('backendTypeOpenAiCompat')) + '</option><option value="gemini">' + escapeHtml(t('backendTypeGemini')) + '</option></select></div>';
+    html += '<div><label>' + escapeHtml(t('backendType')) + '</label><select class="be-backend-type" id="new-be-backend-type"><option value="ollama">' + escapeHtml(t('backendTypeOllama')) + '</option><option value="openai_compat" selected>' + escapeHtml(t('backendTypeOpenAiCompat')) + '</option><option value="gemini">' + escapeHtml(t('backendTypeGemini')) + '</option><option value="passthrough">' + escapeHtml(t('backendTypePassthrough')) + '</option></select></div>';
     html += '<div><label>' + escapeHtml(t('baseUrl')) + '</label><input type="text" class="be-base-url" id="new-be-base-url" placeholder="https://api.openai.com" /></div>';
     html += '<div><label>' + escapeHtml(t('apiKeyLabel')) + '</label><input type="password" class="be-api-key" id="new-be-api-key" placeholder="' + escapeHtml(t('apiKeyNotSet')) + '" autocomplete="off" /></div>';
     html += '<div><label>' + escapeHtml(t('specifiedModel')) + '</label><input type="text" class="be-model" id="new-be-model" placeholder="' + escapeHtml(t('specifiedModelPlaceholder')) + '" /></div>';

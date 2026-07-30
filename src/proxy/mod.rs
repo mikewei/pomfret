@@ -2,4 +2,4 @@
 
 mod openai;
 
-pub use openai::{handle_chat_completions, handle_models};
+pub use openai::{handle_chat_completions, handle_models, handle_passthrough};

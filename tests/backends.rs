@@ -28,7 +28,7 @@ async fn chat_completions_non_stream_returns_body() {
     let body = Bytes::from(r#"{"model":"llama2","messages":[{"role":"user","content":"Hi"}]}"#);
     let res = provider.chat_completions(body, false).await.unwrap();
     match &res {
-        ProviderResponse::Body(b) => {
+        ProviderResponse::Body { bytes: b, .. } => {
             let s = std::str::from_utf8(b).unwrap();
             assert!(s.contains("\"choices\""));
             assert!(s.contains("Hi"));
@@ -123,7 +123,7 @@ async fn gemini_chat_completions_non_stream() {
     let body = Bytes::from(r#"{"model":"gemini-2.0-flash","messages":[{"role":"user","content":"Hi"}]}"#);
     let res = provider.chat_completions(body, false).await.unwrap();
     match &res {
-        ProviderResponse::Body(b) => {
+        ProviderResponse::Body { bytes: b, .. } => {
             let s = std::str::from_utf8(b).unwrap();
             assert!(s.contains("Hello from Gemini"));
         }

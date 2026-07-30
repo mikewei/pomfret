@@ -20,6 +20,8 @@ pub enum BackendType {
     OpenAiCompat,
     Ollama,
     Gemini,
+    #[serde(rename = "passthrough")]
+    Passthrough,
 }
 
 /// Single LLM backend configuration.
